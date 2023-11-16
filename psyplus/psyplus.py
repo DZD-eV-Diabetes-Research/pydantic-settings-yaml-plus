@@ -66,7 +66,7 @@ class YamlSettings:
             required_only=True, use_example_values_if_exists=True
         )
         # print(dummy_values)
-        config = self.model.parse_obj(dummy_values)
+        config = self.model.model_validate(dummy_values)
         self._generate_file(config, generate_with_example_values=True)
 
     def generate_existing_config_file(self, config: BaseSettings):

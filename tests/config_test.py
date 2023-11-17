@@ -8,7 +8,8 @@ from pathlib import Path, PurePath
 class TestConfig(BaseSettings):
     log_level: Literal["INFO", "DEBUG"] = "INFO"
     storage_dir: str = Field(
-        description="A directory to story any states fpr the bot. Only for saving encryption keys/state at the moment.",
+        title="storage for the application state",
+        description="A directory to story any states for the bot. Only for saving encryption keys/state at the moment.",
         default_factory=lambda: str(Path(PurePath(Path().home(), ".config/onbot/"))),
     )
     storage_encryption_key: Annotated[
@@ -30,11 +31,20 @@ class TestConfig(BaseSettings):
                 examples=["company.org", "orga.com"],
             ),
         ]
+        tls_enabled: Annotated[
+            bool,
+            Field(
+                title="Secure tls com",
+                description="Make any conenciton encrpyted",
+                examples=[True, False],
+            ),
+        ] = False
 
     synapse_server: Annotated[
         SynapseServer,
         Field(
             title="Synapse Server Configuration",
             description="To manage users on the Synapse server, the bot need access to the Matrix and Admin Api. The authorization data will be configured in this chapter.",
+            examples=[SynapseServer(server_name="myservername.om", tls=True)],
         ),
     ]

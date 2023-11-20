@@ -12,4 +12,4 @@ from tests.config_test import TestConfig
 
 settings = YamlSettings(TestConfig, "config.yaml")
 
-settings.generate_example_config_file()
+settings.generate_example_config_file(overwrite_existing=True)

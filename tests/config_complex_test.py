@@ -5,7 +5,7 @@ import inspect
 from pathlib import Path, PurePath
 
 
-class TestConfig(BaseSettings):
+class TestConfigCom(BaseSettings):
     log_level: Literal["INFO", "DEBUG"] = "INFO"
     storage_dir: str = Field(
         description="A directory to story any states fpr the bot. Only for saving encryption keys/state at the moment.",
@@ -32,7 +32,7 @@ class TestConfig(BaseSettings):
                     """Synapse's public facing domain https://matrix-org.github.io/synapse/latest/usage/configuration/config_documentation.html#server_name 
                     This is not necessarily the domain under which the Synapse server is reachable. See the docs and your configuration."""
                 ),
-                example="company.org",
+                examples=["company.org"],
             ),
         ]
 
@@ -43,7 +43,7 @@ class TestConfig(BaseSettings):
                     """Url to reach the synapse server. This can (and should) be an internal url. This will prevent you from make your synapse admin api public.
                 But the bot will work with the public URL as well fi you want to."""
                 ),
-                example="https://internal.matrix",
+                examples=["https://internal.matrix"],
             ),
         ]
 
@@ -51,7 +51,7 @@ class TestConfig(BaseSettings):
             str,
             Field(
                 description="The full Matrix user ID for an existing matrix user account. The Bot will interact as this account.",
-                example="@welcome-bot:company.org",
+                examples=["@welcome-bot:company.org"],
             ),
         ]
 
@@ -66,7 +66,7 @@ class TestConfig(BaseSettings):
                 ```
                 """
                 ),
-                example="ZSIBBRS",
+                examples=["ZSIBBRS"],
             ),
         ]
 
@@ -81,14 +81,16 @@ class TestConfig(BaseSettings):
                 ```
                 """
                 ),
-                example="Bearer q7289zhwoieuhrfq279ugdfq3_ONLY_A_EXMAPLE_TOKEN_sadaw4",
+                examples=[
+                    "Bearer q7289zhwoieuhrfq279ugdfq3_ONLY_A_EXMAPLE_TOKEN_sadaw4"
+                ],
             ),
         ]
         admin_api_path: Annotated[
             str,
             Field(
                 description="If your Synapse server admin API is reachable in a subpath you can adapt this here. If you dont know that this is for; keep the default value.",
-                example="_synapse/admin/",
+                examples=["_synapse/admin/"],
             ),
         ] = "_synapse/admin/"
 
@@ -105,7 +107,7 @@ class TestConfig(BaseSettings):
             str,
             Field(
                 description="The URL to reach your Authentik server.",
-                example="https://authentik.company.org/",
+                examples=["https://authentik.company.org/"],
             ),
         ]
         api_key: Annotated[
@@ -115,7 +117,9 @@ class TestConfig(BaseSettings):
                     """The Bearer token access your Authentik server.
                 You can generate a new token for your existing Authentik user at https://authentik.company.org/if/admin/#/core/tokens"""
                 ),
-                example="Bearer yEl4tFqeIBQwoHAd9hajmkm2PBjSAirY_THIS_IS_JUST_AN_EXAMPLE_i57e",
+                examples=[
+                    "Bearer yEl4tFqeIBQwoHAd9hajmkm2PBjSAirY_THIS_IS_JUST_AN_EXAMPLE_i57e"
+                ],
             ),
         ]
 
@@ -235,7 +239,7 @@ class TestConfig(BaseSettings):
                 If unset, all Authentik groups will be mirrored as a Synapse room. 
                 https://goauthentik.io/docs/user-group/group#attributes"""
                 ),
-                example={"is_chatroom": True},
+                examples=[{"is_chatroom": True}],
             ),
         ]
         only_for_groupnames_starting_with: Optional[str]
@@ -259,13 +263,14 @@ class TestConfig(BaseSettings):
                     e.g. you could create an Authentik group named "Matrix-Moderators" with `{"attributes":{"chat-powerlevel":50}}`. All members of this group will get Matrix power level 50 in their onbot group rooms
                     If a user gets admin via `sync_matrix_rooms_based_on_authentik_groups.make_authentik_superusers_matrix_room_admin` `authentik_group_attr_for_matrix_power_level` will be ignored """
                 ),
-                example="synapse-options.chat-powerlevel",
+                examples=["synapse-options.chat-powerlevel"],
             ),
         ] = "chat-powerlevel"
 
-    sync_matrix_rooms_based_on_authentik_groups: SyncMatrixRoomsBasedOnAuthentikGroups = (
-        SyncMatrixRoomsBasedOnAuthentikGroups()
-    )
+    sync_matrix_rooms_based_on_authentik_groups: Annotated[
+        SyncMatrixRoomsBasedOnAuthentikGroups,
+        Field(default_factory=SyncMatrixRoomsBasedOnAuthentikGroups),
+    ]
 
     class MatrixDynamicRoomSettings(BaseModel):
         alias_prefix: Optional[str] = None
@@ -316,24 +321,27 @@ class TestConfig(BaseSettings):
     per_authentik_group_pk_matrix_room_settings: Annotated[
         Optional[Dict[str, MatrixDynamicRoomSettings]],
         Field(
-            example={
-                "80439f0d-d936-4118-8017-52a95d6dd1bc": MatrixDynamicRoomSettings(
-                    matrix_alias_from_authentik_attribute="attribute.custom",
-                    topic_prefix="TOPIC PREFIX FOR SPECIFIC ROOM:",
-                )
-            }
+            examples=[
+                {
+                    "80439f0d-d936-4118-8017-52a95d6dd1bc": MatrixDynamicRoomSettings(
+                        matrix_alias_from_authentik_attribute="attribute.custom",
+                        topic_prefix="TOPIC PREFIX FOR SPECIFIC ROOM:",
+                    )
+                }
+            ]
         ),
     ] = {}
 
     matrix_user_ignore_list: Annotated[
-        Optional[List[str]], Field(example={"@admin:company.org", "@root:company.org"})
+        Optional[List[str]],
+        Field(examples=[{"@admin:company.org", "@root:company.org"}]),
     ] = []
 
     authentik_user_ignore_list: Annotated[
-        Optional[List[str]], Field(example=["admin", "internal_account_alex"])
+        Optional[List[str]], Field(examples=[["admin", "internal_account_alex"]])
     ] = []
     authentik_group_ignore_list: Annotated[
-        Optional[List[str]], Field(example=["internal_company_group"])
+        Optional[List[str]], Field(examples=[["internal_company_group"]])
     ] = []
 
     class DeactivateDisabledAuthentikUsersInMatrix(BaseModel):

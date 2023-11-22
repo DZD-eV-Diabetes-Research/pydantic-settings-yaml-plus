@@ -113,8 +113,9 @@ class FieldInfoContainer:
                         json_subscheme_type[jsi] = self.json_model_schema[jsi]
                 return json_subscheme_type
         # default types
-
-        return self.json_model_schema["type"]
+        if "type" in self.json_model_schema:
+            return self.json_model_schema["type"]
+        return None
 
     @property
     def field_value_enum(
@@ -155,13 +156,15 @@ class FieldInfoContainer:
             field_info_container.container_model_hierachy.append(
                 {model_walking_current: parent_key}
             )
-
-            if key in model_walking_current.model_fields:
+            if (
+                hasattr(model_walking_current, "model_fields")
+                and key in model_walking_current.model_fields
+            ):
                 # we are reached the direct parent container
                 field_info_container.field_info = model_walking_current.model_fields[
                     key
                 ]
-            elif key != parent_key:
+            elif key != parent_key and key in parents_key_path:
                 # we are still in a grand-*-parent container
                 model_walking_current = model_walking_current.model_fields[
                     parent_key

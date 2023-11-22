@@ -20,6 +20,7 @@ from pydantic import BaseModel, fields
 from pydantic_core import PydanticUndefinedType
 import pydantic
 from pydantic_settings import BaseSettings
+from pydantic_core import PydanticUndefined
 from pathlib import Path, PurePath
 import yaml
 from dataclasses import dataclass
@@ -59,11 +60,13 @@ class YamlSettings:
             replace_pattern={null_placeholder: "null"},
         )
 
-    def generate_example_config_file(self, overwrite_existing: bool = False):
+    def generate_config_file_with_examples_values(
+        self, overwrite_existing: bool = False
+    ):
         dummy_values = self._get_fields_filler(
             required_only=True, use_example_values_if_exists=True
         )
-
+        print("dummy_values", dummy_values)
         config = self.model.model_validate(dummy_values)
         self._generate_file(
             config,
@@ -71,11 +74,11 @@ class YamlSettings:
             overwrite_existing=overwrite_existing,
         )
 
-    def generate_existing_config_file(self, config: BaseSettings):
+    def generate_config_file_from_config_object(self, config: BaseSettings):
         self._generate_file(config)
 
-    def generate_minimal_config_file(self):
-        config = self.model.parse_obj(
+    def generate_config_file_with_only_required_keys(self):
+        config = self.model.model_validate(
             self._get_fields_filler(
                 required_only=True,
                 use_example_values_if_exists=True,
@@ -87,6 +90,45 @@ class YamlSettings:
         raise NotImplementedError()
 
     def _generate_file(
+        self,
+        config: BaseSettings,
+        overwrite_existing: bool = False,
+        exists_ok: bool = False,
+        generate_with_optional_fields: bool = True,
+        comment_out_optional_fields: bool = True,
+        generate_with_comment_desc_header: bool = True,
+        generate_with_example_values: bool = False,
+        replace_pattern: Dict = None,
+    ):
+        self.config_file.parent.mkdir(exist_ok=True, parents=True)
+        if self.config_file.is_file() and not overwrite_existing:
+            if exists_ok:
+                return
+            else:
+                raise FileExistsError(
+                    f"Can not generate config file at {self.config_file}. File allready exists."
+                )
+        if replace_pattern is None:
+            replace_pattern = {}
+        yaml_content: str = yaml.dump(config.model_dump(), sort_keys=False)
+        from psyplus.yaml_comment_injector import YamlCommentInjector
+
+        yaml_content_with_comment = YamlCommentInjector(
+            yaml=yaml_content, model=config
+        ).inject_field_headers()
+
+        with open(self.config_file, "w") as file:
+            lines = []
+            if not replace_pattern:
+                lines = yaml_content_with_comment
+            else:
+                for line in yaml_content_with_comment:
+                    for key, val in replace_pattern.items():
+                        lines.append(f"{line.replace(key, val)}\n")
+            for l in lines:
+                file.write(l + "\n")
+
+    def _generate_file_old(
         self,
         config: BaseSettings,
         overwrite_existing: bool = False,
@@ -123,8 +165,8 @@ class YamlSettings:
                     current_path.pop()
             if line_no_indent.startswith("- "):
                 # we are in list element
+                print("pass list line:", line)
                 pass
-
             elif ": " in line:
                 key, val = line.split(": ")
                 key = key.strip()
@@ -225,17 +267,21 @@ class YamlSettings:
         )
         if field.field_value_type_name:
             header_lines.append(f"# Type: {field.field_value_type_name}")
-            header_lines.append(f"# Python Annotation: {field.field_info.annotation}")
+            # header_lines.append(f"# Python Annotation: {field.field_info.annotation}")
         header_lines.append(f"# Required: {field.field_info.is_required()}")
+        if field.field_info.default != PydanticUndefined:
+            header_lines.append(
+                f"# Defaults to {field.field_info.default if not None else 'null/None'}"
+            )
+        if field.field_value_enum:
+            header_lines.append(f"# Allowed values: {field.field_value_enum}")
+        if field.field_info.metadata:
+            header_lines.append(f"# Constraints: {field.field_info.metadata}")
+
         header_lines.append(f"# Env var name: '{field.env_var_name}'")
         if field_schema.description:
             desc = field_schema.description.replace("\n", f"\n{indent}#   ")
             header_lines.append(f"# Description: {desc}")
-
-        if field.field_value_enum:
-            header_lines.append(f"# Allowed values: {field.field_value_enum}")
-        if type(field.field_info.default) != PydanticUndefinedType:
-            header_lines.append(f"# Defaults to {field.field_info.default}")
 
         if field_schema.examples:
             exmpl = f"\n" + yaml.dump(
@@ -263,7 +309,7 @@ class YamlSettings:
             Dict: _description_
         """
 
-        def parse_model_class(m_cls: Type[BaseModel]) -> Dict:
+        def parse_model_class(m_cls: Type[BaseSettings | BaseModel]) -> Dict:
             result: Dict = {}
             for key, field in m_cls.model_fields.items():
                 if not required_only or field.is_required():
@@ -271,32 +317,39 @@ class YamlSettings:
                         example = field.examples[0]
                         # We want to generate a example models and there are examples in the annotation
                         # if it is a real config object we pass it to as a values else we try to create a json compatible string
+
+                        result[key] = example
+                        """
                         if inspect.isclass(field.annotation) and issubclass(
                             field.annotation, BaseModel
                         ):
                             result[key] = example
                         else:
                             result[key] = self.jsonfy_example(example)
-
+                        """
                     elif inspect.isclass(field.annotation) and issubclass(
-                        field.annotation, BaseModel
+                        field.annotation, BaseModel | BaseSettings
                     ):
-                        if field.default is not fields._Unset:
+                        if field.default is not PydanticUndefined:
                             result[key] = field.default
                         elif field.default_factory is not None:
                             result[key] = field.default_factory()
                         else:
                             result[key] = parse_model_class(field.annotation)
-                    elif isinstance(
-                        field.annotation,
-                        (str, int, float, complex, list, dict, set, tuple),
-                    ):
-                        result[key] = self.jsonfy_example(field.annotation())
+                    elif field.annotation == Any:
+                        result[key] = ""
+                    elif type(field.annotation) in (typing._GenericAlias, type):
+                        # This is a basic type. we can provide some reasonable sane default values like 0 for int or "" for str
+                        if hasattr(field.annotation, "__origin__"):
+                            result[key] = field.annotation.__origin__()
+                        elif type(field.annotation) == type:
+                            # we have a basic type
+                            result[key] = field.annotation()
+
                     elif (
                         isinstance(field, fields.FieldInfo)
                         and field.default_factory is not None
                     ):
-                        val = self.jsonfy_example(field.default_factory())
                         result[key] = self.jsonfy_example(field.default_factory())
                     else:
                         result[key] = (

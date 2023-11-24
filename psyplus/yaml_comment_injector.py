@@ -8,7 +8,14 @@ class YamlCommentInjector:
         self.yaml: str = yaml
         self.model: BaseSettings = model
 
-    def inject_field_headers(self, depth=0):
+    def inject_field_headers(self) -> str:
+        self._inject_field_headers(yaml_content=self.yaml, parent_path=[])
+
+    def _inject_field_headers(
+        self,
+        yaml_content: str,
+        parent_path: Dict[str, BaseSettings | BaseModel | Dict | List],
+    ):
         for key, field in self.model.model_fields.items():
             if self._has_list_annotation(field):
                 print("is a list", key, field.annotation)

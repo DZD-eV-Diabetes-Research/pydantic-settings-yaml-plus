@@ -1,6 +1,6 @@
 from pydantic import BaseModel, fields
 from pydantic_settings import BaseSettings
-from typing import List, Dict, Any, get_args, Annotated, get_type_hints
+from typing import List, Dict, Any, get_args, Annotated, get_type_hints, Tuple
 import yaml
 from psyplus.field_info_container import FieldInfoContainer
 
@@ -37,6 +37,7 @@ class YamlCommentInjector:
                     print("is a list", key, field.annotation)
                     # check if there is a object type in the list
                 elif self._has_dict_annotation(field):
+                    dict_items_annotation = self._get_field_dict_item_annotation(field)
                     print("is a dict", key, field.annotation)
                 elif self._has_subclass_annotation(field):
                     print("is subclass", key, field.annotation)
@@ -80,17 +81,11 @@ class YamlCommentInjector:
             return True
         return False
 
-    def _get_field_list_item_annotation(self, field: fields.FieldInfo) -> Any:
-        print("field.annotation", field.annotation.__args__)
+    def _get_field_list_item_annotation(self, field: fields.FieldInfo) -> Tuple[Any]:
         if field.annotation == list:
-            return Any
-        for k, v in field.annotation.items():
-            print(k, v)
-        exit()
-        print("annotation", field)
-        type_h = get_type_hints(field)
-        print("get_type_hints", type_h)
-        exit()
+            return tuple()
+        else:
+            return field.annotation.__args__
 
     def _has_dict_annotation(self, field: fields.FieldInfo):
         annotation = field.annotation
@@ -99,6 +94,12 @@ class YamlCommentInjector:
         elif hasattr(annotation, "__origin__") and annotation.__origin__ is dict:
             return True
         return False
+
+    def _get_field_dict_item_annotation(self, field: fields.FieldInfo) -> Tuple[Any]:
+        if field.annotation == dict:
+            return tuple()
+        else:
+            return field.annotation.__args__
 
     def _has_subclass_annotation(self, field: fields.FieldInfo):
         annotation = field.annotation

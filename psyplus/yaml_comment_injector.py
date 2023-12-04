@@ -307,13 +307,19 @@ class YamlCommentInjector:
         self.model: BaseSettings = model
 
     def inject_field_headers(self) -> str:
+        print("model", self.model)
         for line in self.yaml.lines:
+            model_chapter = self.model
             for path_fragment in line.path:
+                if (
+                    not isinstance(path_fragment, ListIndex)
+                    and path_fragment in model_chapter.model_fields
+                ):
+                    print(model_chapter.model_fields[path_fragment])
+                else:
+                    print("Catch list", path_fragment)
                 ### TODO you are here. match yaml line path to model path and extract metadat from model for comments generation
-                pass
-        self._iter_model_and_inject_field_headers(
-            self.yaml, current_obj=self.model, parent_path=[]
-        )
+        exit()
 
     def _iter_model_and_inject_field_headers(
         self,
@@ -321,6 +327,7 @@ class YamlCommentInjector:
         current_obj: BaseSettings | BaseModel | Dict | List,
         parent_path: List[Dict[str, BaseSettings | BaseModel | Dict | List]],
     ):
+        # propably obsolete func. remove later
         if hasattr(current_obj, "model_fields"):
             for key, field in current_obj.model_fields.items():
                 if self._has_list_annotation(field):

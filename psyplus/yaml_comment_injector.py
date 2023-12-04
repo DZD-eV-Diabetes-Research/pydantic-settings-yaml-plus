@@ -1,13 +1,22 @@
 from pydantic import BaseModel, fields
 from pydantic_settings import BaseSettings
-from typing import List, Dict, Any, get_args, Annotated, get_type_hints, Tuple
+from typing import (
+    List,
+    Dict,
+    Any,
+    get_args,
+    Annotated,
+    get_type_hints,
+    Tuple,
+    Generator,
+)
 from typing_extensions import Self
 import yaml
 from psyplus.field_info_container import FieldInfoContainer
 from dataclasses import dataclass
 
 
-class YamlLineNoScalarVal:
+class YamlNullVal:
     pass
 
 
@@ -28,7 +37,7 @@ class YamlLine:
     @property
     def previous_line(self) -> Self | None:
         self_index = self.parent_yaml_file.lines.index(self)
-        if self_index > 0 and self_index + 1 < len(self.parent_yaml_file.lines):
+        if self_index > 0 and self_index + 1 <= len(self.parent_yaml_file.lines):
             return self.parent_yaml_file.lines[self_index - 1]
         return None
 
@@ -42,11 +51,13 @@ class YamlLine:
     @property
     def parent_key_line(self) -> Self | None:
         # The most previous line that is a higher in the tree hirarchy
-        if self.depth == 0:
+        if self.depth == 0 and not self.line_no_indent.startswith("- "):
             return None
         current_line = self
         parent_found = False
         while not parent_found:
+            if current_line.is_list_item:
+                return current_line.list_item_first_sibling_line.previous_line
             prev = current_line.previous_line
             if prev is None:
                 return None
@@ -55,34 +66,39 @@ class YamlLine:
             else:
                 current_line = prev
 
+    """UNUSED. REMOVE LATER
     @property
     def is_list_key(self) -> bool:
-        # has this line a key and is it the start key of a list
+        # has this line a key and is the value to this key a list
         if self.line_scalar_value in ("[]", []):
             return True
-        print("###", self.line_raw, self.line_scalar_value)
-        if (
-            not self.line_scalar_value
-            and self.next_line.depth > self.depth
-            and self.next_line.line_no_indent.startswith("- ")
-        ):
-            print("IS LIST:", self.line_key)
-            return True
-        if (
-            not self.line_scalar_value
-            and self.next_line.depth == self.depth
-            and not self.line_no_indent.startswith("- ")
-            and self.next_line.line_no_indent.startswith("- ")
-        ):
-            print("IS LIST:", self.line_key)
+        if not self.line_scalar_value and self.next_line.is_list_item:
+            print("IS LIST:", self.line_raw, self.line_key)
             return True
         print("NOT A LIST", self.line_key, self.line_scalar_value)
         return False
+    """
 
     @property
-    def leading_top_sibling(self) -> Self | None:
-        # the first attr of parent object
-        raise NotImplementedError()
+    def is_list_item(self) -> bool:
+        if self.list_item_leading_attr_line is not None:
+            return True
+        return False
+
+    @property
+    def is_list_inline_style(self) -> bool:
+        top_list_item_line = self.list_item_first_sibling_line
+        if (
+            top_list_item_line.previous_line
+            and top_list_item_line.indent_depth
+            == top_list_item_line.previous_line.indent_depth
+        ):
+            return True
+        return False
+
+    @property
+    def list_index(self) -> int:
+        return len(list(self.walk_back_list_item_lines())) - 1
 
     @property
     def leading_list_siblings(self) -> Self | None:
@@ -91,14 +107,8 @@ class YamlLine:
         raise NotImplementedError()
 
     @property
-    def is_list_item(self) -> bool:
-        if self.list_item_leading_attr_line:
-            return True
-        return False
-
-    @property
     def list_item_leading_attr_line(self) -> Self | None:
-        # if part of a list item return the leading item with "-" in front
+        # if this lines key/value is part of a list item/object return the leading item with "-" in front
         # eg:
         # - attr1: value1
         #   attr2: value2 # <-this line is self
@@ -109,8 +119,11 @@ class YamlLine:
             # hey, we are the leading list item. that was easy
             return self
         previous_line = self.previous_line
+
         while True:
-            if (
+            if previous_line is None:
+                return None
+            elif (
                 previous_line.indent_depth == self.indent_depth - 1
                 and previous_line.line_no_indent.startswith("- ")
             ):
@@ -119,43 +132,70 @@ class YamlLine:
                 previous_line.indent_depth == self.indent_depth - 1
                 and not previous_line.line_no_indent.startswith("- ")
             ):
-                # we are walked up in the hirachy but there is not list item. seems we are not in a list
+                # we are walked up in the hirachy but there is no list item. seems we are not in a list
                 return None
             else:
                 previous_line = previous_line.previous_line
 
-    @property
-    def list_item_top_sibling(self) -> Self | None:
-
+    def walk_back_list_item_lines(self) -> Generator[Self, None, None]:
+        # iter list to the begining. starting from the from the 'self'-item
         # TODO: TEST THIS and then use it in depth
 
         # if part of a list return the first item of this list
         if self.is_list_item:
-            leading_list_item_attr_line = self.list_item_leading_attr_line
-            prev_line = leading_list_item_attr_line.previous_line
+            source_leading_list_item_attr_line = self.list_item_leading_attr_line
+
+            leading_list_item_attr_line = source_leading_list_item_attr_line
+
             while True:
-                if leading_list_item_attr_line.indent_depth == prev_line.indent_depth and not prev_line.line_no_indent.startswith("- "):
-                    # inline style list
-                    return prev_line
-                elif leading_list_item_attr_line.indent_depth > prev_line.indent_depth:
-                    # block style list
-                    return prev_line
-                elif leading_list_item_attr_line.indent_depth < prev_line.indent_depth or leading_list_item_attr_line.indent_depth == prev_line.indent_depth and prev_line.line_no_indent.startswith("- "):
-                    # we are still somewhere in the list. walk another line up.
-                    prev_line = prev_line.previous_line
-                else:
-                    # there is not list
+                if (
+                    leading_list_item_attr_line is None
+                    or leading_list_item_attr_line.indent_depth
+                    != source_leading_list_item_attr_line.indent_depth
+                ):
+                    # we left the origin list or there is no more list item
+
                     return None
+                if leading_list_item_attr_line is None:
+                    return
+                yield leading_list_item_attr_line
+                # catch previous list item if exists
+                prev_line = leading_list_item_attr_line.previous_line
+                if prev_line:
+                    leading_list_item_attr_line = (
+                        leading_list_item_attr_line.previous_line.list_item_leading_attr_line
+                    )
+                else:
+                    return None
+
+    @property
+    def list_item_first_sibling_line(self) -> Self | None:
+        # TODO: TEST THIS and then use it in depth
+
+        # if part of a list return the first item of this list
+        list_item_lines = list(self.walk_back_list_item_lines())
+        if list_item_lines:
+            return list_item_lines[-1]
+
+    @property
+    def object_leading_top_sibling(self) -> Self | None:
+        # the first attr of parent object
+        raise NotImplementedError()
 
     @property
     def path(self) -> List[str | type(List)]:
         path = []
-        current_key_line = self.parent_key_line
-        while current_key_line is not None:
-            if current_key_line.is_list_key:
-                path.insert(0, ListIndex(index=0))
-            path.insert(0, current_key_line.line_key)
-            current_key_line = current_key_line.parent_key_line
+
+        iter_line = self
+        while iter_line is not None:
+            if iter_line.line_key:
+                line_key = iter_line.line_key
+                if iter_line.line_key.startswith("- "):
+                    line_key = iter_line.line_key.replace("- ", " ", 1)
+                path.insert(0, line_key.strip())
+            if iter_line.is_list_item:
+                path.insert(0, ListIndex(index=iter_line.list_index))
+            iter_line = iter_line.parent_key_line
         return path
 
     @property
@@ -168,7 +208,8 @@ class YamlLine:
 
     @property
     def depth(self) -> int:
-        indent_depth = self.indent_depth()
+        indent_depth = self.indent_depth
+
         # list item with same depth as parent key exception
         # this cases are both possible:
         # inline_list:
@@ -181,34 +222,9 @@ class YamlLine:
         #
         # todo: this is way too hacky. find a better solution
 
-        if self.is_list_item:
-            leading_list_item_attr_line = self.list_item_leading_attr_line
-            prev_line = leading_list_item_attr_line.previous_line
-            while True:
-                if leading_list_item_attr_line.indent_depth >= prev_line.indent_depth and not prev_line.line_no_indent.startswith("- "):
-                    
-                if (
-                    not prev_line.line_no_indent.startswith("- ")
-                    and prev_line_depth == indent_depth
-                ):
-                    # we found the parent of a inline list. we need to add one point to the depth
-                    return indent_depth + 1
-                elif (
-                    not prev_line.line_no_indent.startswith("- ")
-                    and prev_line_depth < indent_depth
-                ):
-                    # we have parent of a block style list. the depth is correct for our logic
-                    return indent_depth
-                else:
-                    prev_line = prev_line.previous_line
-
+        if self.is_list_item and self.is_list_inline_style:
+            indent_depth + 1
         return indent_depth
-        if len(self.path) != indent_depth:
-            raise ValueError(
-                f"The calculated depth missmatches the counted depth. There may be a bug. path: '{self.path}', line: {self.line_raw}"
-            )
-        # /sanity check end
-        return len(self.path)
 
     @property
     def has_children(self) -> bool:
@@ -235,7 +251,7 @@ class YamlLine:
         return None
 
     @property
-    def line_scalar_value(self) -> str | int | float | bool | None:
+    def line_scalar_value(self) -> str | None:
         # raise NotImplementedError
         split_line = self.line_content.split(":", 1)
         if (
@@ -264,36 +280,37 @@ class YamlFile:
         self.indent = indent
         self.lines: List[YamlLine] = []
         self._parse_yaml()
-        print("---------------")
-        for line in self.lines:
-            print(line, line.path)
-
-        exit()
 
     def _parse_yaml(self):
-        comments = ""
+        comments_and_emptylines = ""
         for line_raw in self.input_yaml.split("\n"):
-            if line_raw.strip().startswith("#"):
+            if line_raw.strip().startswith("#") or line_raw.strip() == "":
                 # just a comment line. store it to attach it to next comming line as leading_comment
                 # and continue
-                comments += line_raw
+                comments_and_emptylines += line_raw
                 continue
             line = YamlLine(
                 parent_yaml_file=self,
                 line_raw=line_raw,
-                leading_comment=comments if comments else None,
+                leading_comment=comments_and_emptylines
+                if comments_and_emptylines
+                else None,
             )
 
-            comments = ""
+            comments_and_emptylines = ""
             self.lines.append(line)
 
 
 class YamlCommentInjector:
     def __init__(self, yaml: str, model: BaseSettings | BaseModel):
-        self.yaml: str = yaml
+        self.yaml: YamlFile = YamlFile(yaml)
         self.model: BaseSettings = model
 
     def inject_field_headers(self) -> str:
+        for line in self.yaml.lines:
+            for path_fragment in line.path:
+                ### TODO you are here. match yaml line path to model path and extract metadat from model for comments generation
+                pass
         self._iter_model_and_inject_field_headers(
             self.yaml, current_obj=self.model, parent_path=[]
         )

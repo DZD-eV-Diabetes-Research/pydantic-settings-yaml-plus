@@ -13,6 +13,7 @@ class ExternalSubClass(BaseModel):
 
 class TestConfig(BaseSettings):
     simple: Any
+    simple_list: List = [1, 2, 3]
     log_level: Literal["INFO", "DEBUG"] = "INFO"
     storage_dir: str = Field(
         title="storage for the application state",

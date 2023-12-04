@@ -65,4 +65,13 @@ def envtest():
     # > {'redis': {'host': 'localhost', 'port': 6379}}
 
 
-envtest()
+# envtest()  #
+
+
+def intend_test():
+    import yaml
+
+    print(yaml.dump({"l1": [1, 2, 3]}, default_flow_style=True))
+
+
+intend_test()

@@ -111,7 +111,9 @@ class YamlSettings:
         if replace_pattern is None:
             replace_pattern = {}
         yaml_content: str = yaml.dump(config.model_dump(), sort_keys=False)
-        from psyplus.yaml_comment_injector import YamlCommentInjector
+        from psyplus.yaml_comment_injector import YamlCommentInjector, YamlFile
+
+        YamlFile(yaml=yaml_content)
 
         yaml_content_with_comment = YamlCommentInjector(
             yaml=yaml_content, model=config

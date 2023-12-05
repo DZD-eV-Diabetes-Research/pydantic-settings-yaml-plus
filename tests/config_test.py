@@ -5,7 +5,7 @@ import inspect
 from pathlib import Path, PurePath
 
 
-class ExternalSubClass(BaseModel):
+class ExternalSubClass(BaseSettings):
     test: Any
     test_simple_list: List[str]
     test_simple_dict: Dict[int, str]
@@ -14,6 +14,7 @@ class ExternalSubClass(BaseModel):
 class TestConfig(BaseSettings):
     simple: Any
     simple_list: List = [1, 2, 3]
+    simple_list_ano: List[int] = [1, 2, 3]
     log_level: Literal["INFO", "DEBUG"] = "INFO"
     storage_dir: str = Field(
         title="storage for the application state",
@@ -26,6 +27,15 @@ class TestConfig(BaseSettings):
             description="A passphrase that will be used to encrypt end to end encryption keys https://github.com/poljar/matrix-nio/blob/2632a72e7acee401c4354646a40f31db04db4258/nio/client/base_client.py#L145"
         ),
     ] = None
+    multiline_value: str = Field(
+        examples=[
+            """This is a 
+multiline value.
+And you cant do n'thing about. i even attached an empty extra line. watyagonnado?
+
+"""
+        ]
+    )
     constraint_val: Annotated[
         Optional[str],
         Field(

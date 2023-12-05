@@ -74,4 +74,29 @@ def intend_test():
     print(yaml.dump({"l1": [1, 2, 3]}, default_flow_style=True))
 
 
-intend_test()
+# intend_test()
+
+
+def list_replace_test():
+    l1 = ["A", "b", "c"]
+    itemb = l1[1]
+    print(itemb)
+    itemb = None
+    print(l1, itemb)
+
+
+def remove_ml_indi():
+    import re
+
+    YAML_BLOCK_SCALAR_INDICATOR = (">", "|", ">-", "|-", ">+", "|+")
+    teststrings = ["> sdafeas fwef we", ">- asdiohweuifguewfhdsfsd", "+ safd aesdfe"]
+    for t in teststrings:
+        tr = re.sub(
+            f"^(?:{'|'.join(map(re.escape, YAML_BLOCK_SCALAR_INDICATOR))})",
+            "",
+            t,
+        )
+        print(tr)
+
+
+remove_ml_indi()

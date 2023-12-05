@@ -66,7 +66,7 @@ class YamlSettings:
         dummy_values = self._get_fields_filler(
             required_only=True, use_example_values_if_exists=True
         )
-        print("dummy_values", dummy_values)
+
         config = self.model.model_validate(dummy_values)
         self._generate_file(
             config,

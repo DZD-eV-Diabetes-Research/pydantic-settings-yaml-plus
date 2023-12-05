@@ -14,3 +14,8 @@ A tiny helper class to use pydantic-settings to generate, read and comment your 
 * update existing config files metadata
   * Update info, descs
   * Add missing/new required values
+
+
+### To investigate
+* What about date(times) support?
+* Support block values

@@ -9,6 +9,7 @@ from typing import (
     get_type_hints,
     Tuple,
     Generator,
+    Type,
 )
 from typing_extensions import Self
 import yaml
@@ -20,6 +21,7 @@ class YamlNullVal:
     pass
 
 
+# https://yaml-multiline.info/
 YAML_BLOCK_SCALAR_INDICATOR = (">", "|", ">-", "|-", ">+", "|+")
 
 
@@ -33,6 +35,8 @@ class YamlLine:
     parent_yaml_file: "YamlFile"
     line_raw: str
     leading_comment: str = None
+    # https://yaml-multiline.info/
+    multiline_value: List[str] = None
 
     @property
     def previous_line(self) -> Self | None:
@@ -41,12 +45,14 @@ class YamlLine:
             return self.parent_yaml_file.lines[self_index - 1]
         return None
 
+    """dead code?
     @property
     def next_line(self) -> Self | None:
         self_index = self.parent_yaml_file.lines.index(self)
         if self_index + 1 < len(self.parent_yaml_file.lines):
             return self.parent_yaml_file.lines[self_index + 1]
         return None
+    """
 
     @property
     def parent_key_line(self) -> Self | None:
@@ -66,7 +72,7 @@ class YamlLine:
             else:
                 current_line = prev
 
-    """UNUSED. REMOVE LATER
+    """dead code?
     @property
     def is_list_key(self) -> bool:
         # has this line a key and is the value to this key a list
@@ -99,12 +105,6 @@ class YamlLine:
     @property
     def list_index(self) -> int:
         return len(list(self.walk_back_list_item_lines())) - 1
-
-    @property
-    def leading_list_siblings(self) -> Self | None:
-        # if self is a list item, return all other items of the list that are in front of self
-
-        raise NotImplementedError()
 
     @property
     def list_item_leading_attr_line(self) -> Self | None:
@@ -178,11 +178,6 @@ class YamlLine:
             return list_item_lines[-1]
 
     @property
-    def object_leading_top_sibling(self) -> Self | None:
-        # the first attr of parent object
-        raise NotImplementedError()
-
-    @property
     def path(self) -> List[str | type(List)]:
         path = []
 
@@ -226,12 +221,14 @@ class YamlLine:
             indent_depth + 1
         return indent_depth
 
+    """dead code?
     @property
     def has_children(self) -> bool:
         nl = self.next_line
         if nl is not None and nl.depth > self.depth:
             return True
         return False
+    """
 
     @property
     def line_no_indent(self) -> str:
@@ -247,22 +244,18 @@ class YamlLine:
     def line_key(self) -> str | None:
         split_line = self.line_content.split(":", 1)
         if len(split_line) == 2:
-            return split_line[0]
+            return split_line[0].replace("- ", "", 1).strip()
         return None
 
     @property
-    def line_scalar_value(self) -> str | None:
+    def line_value(self) -> str | None:
         # raise NotImplementedError
         split_line = self.line_content.split(":", 1)
-        if (
-            len(split_line) == 2
-            and split_line[1]
-            and not split_line[1].endswith(YAML_BLOCK_SCALAR_INDICATOR)
-        ):
-            return split_line[1].lstrip()
+        if len(split_line) == 2 and split_line[1]:
+            return split_line[1].strip()
         if len(split_line) == 1:
             # return scalar value but remove possible list indicator
-            return self.line_content.replace("- ", "", 1).lstrip()
+            return self.line_content.replace("- ", "", 1).strip()
         return None
 
     @property
@@ -272,6 +265,38 @@ class YamlLine:
             self.line_no_indent.split("#", 1)[1].strip()
         except IndexError:
             return None
+
+    @property
+    def initiates_multiline_value(self) -> bool:
+        if not self.line_value:
+            return False
+        if self.is_multiline_block_scalar:
+            return True
+        if self.line_value.startswith(
+            ("'", '"', "“", "”")
+        ) and not self.line_value.endswith(("'", '"', "“", "”")):
+            return True
+        return False
+
+    @property
+    def is_multiline_block_scalar(self) -> bool:
+        if len(self.line_value) < 3 and self.line_value.endswith(
+            YAML_BLOCK_SCALAR_INDICATOR
+        ):
+            return True
+        return False
+
+    @property
+    def multiline_flow_scalar_first_line(self) -> str | None:
+        # if line is a multiline flow scalar value (https://yaml-multiline.info/)
+        # return the first line after the key.
+        # e.g.
+        #   example: 'Several lines of text,\n
+        #   ··containing ''single quotes''. Escapes (like \n) don''t do anything.\n'
+        # in this case this func will return `'Several lines of text,\n`
+        # will return None if line is not a multiline flow scalar
+        if self.initiates_multiline_value:
+            return
 
 
 class YamlFile:
@@ -283,12 +308,9 @@ class YamlFile:
 
     def _parse_yaml(self):
         comments_and_emptylines = ""
+        multiline_value_parent_line: YamlLine = None
+        multiline_value: List[str] = []
         for line_raw in self.input_yaml.split("\n"):
-            if line_raw.strip().startswith("#") or line_raw.strip() == "":
-                # just a comment line. store it to attach it to next comming line as leading_comment
-                # and continue
-                comments_and_emptylines += line_raw
-                continue
             line = YamlLine(
                 parent_yaml_file=self,
                 line_raw=line_raw,
@@ -296,6 +318,31 @@ class YamlFile:
                 if comments_and_emptylines
                 else None,
             )
+            if (
+                multiline_value_parent_line is not None
+                and line.indent_depth > multiline_value_parent_line.indent_depth
+            ):
+                multiline_value.append(line_raw)
+                continue
+            elif (
+                multiline_value_parent_line is not None
+                and line.indent_depth <= multiline_value_parent_line.indent_depth
+            ):
+                multiline_value_parent_line.multiline_value = multiline_value
+                multiline_value_parent_line = None
+                multiline_value = []
+
+            if line_raw.strip().startswith("#") or line_raw.strip() == "":
+                # just a comment line. store it to attach it to next comming line as leading_comment
+                # and continue
+                comments_and_emptylines += line_raw
+                continue
+
+            if line.initiates_multiline_value and multiline_value_parent_line is None:
+                if not line.is_multiline_block_scalar:
+                    # this is flow scalar and will have data in the first line unlike a block scalar (https://yaml-multiline.info/)
+                    multiline_value.append(line.line_value)
+                multiline_value_parent_line = line
 
             comments_and_emptylines = ""
             self.lines.append(line)
@@ -307,71 +354,73 @@ class YamlCommentInjector:
         self.model: BaseSettings = model
 
     def inject_field_headers(self) -> str:
-        print("model", self.model)
+        # print("model", self.model)
+        print(self.yaml.input_yaml)
         for line in self.yaml.lines:
-            model_chapter = self.model
-            for path_fragment in line.path:
-                if (
-                    not isinstance(path_fragment, ListIndex)
-                    and path_fragment in model_chapter.model_fields
-                ):
-                    print(model_chapter.model_fields[path_fragment])
-                else:
-                    print("Catch list", path_fragment)
-                ### TODO you are here. match yaml line path to model path and extract metadat from model for comments generation
+            parent_model_path, field_info = self._get_model_field_by_yaml_path(
+                line.path
+            )
+
+            if field_info is not None:
+                field_info_wrapper = FieldInfoContainer(
+                    field_name=line.line_key,
+                    field_info=field_info,
+                    container_model_hierachy=parent_model_path,
+                )
+                line.leading_comment = self.generate_comment(
+                    line=line.line_raw,
+                    path=line.path,
+                    key=line.line_key,
+                    field=field_info_wrapper,
+                    indent_depth=line.indent_depth,
+                )
+
+            ### TODO you are here. match yaml line path to model path and extract metadat from model for comments generation
         exit()
 
-    def _iter_model_and_inject_field_headers(
+    def _get_model_field_by_yaml_path(
         self,
-        yaml_content: str,
-        current_obj: BaseSettings | BaseModel | Dict | List,
-        parent_path: List[Dict[str, BaseSettings | BaseModel | Dict | List]],
-    ):
-        # propably obsolete func. remove later
-        if hasattr(current_obj, "model_fields"):
-            for key, field in current_obj.model_fields.items():
-                if self._has_list_annotation(field):
-                    parent_path.append({current_obj.__class__: key})
-                    list_item_annotation = self._get_field_list_item_annotation(field)
-                    parent_path.append({List: list_item_annotation})
+        yaml_path: List[str | ListIndex],
+    ) -> Tuple[List[Dict[Type[BaseSettings], str]] | None, fields.FieldInfo | None]:
+        container_model_hierachy: List[Dict[Type[BaseSettings], str]] = []
+        model_chapter_parent = None
+        model_chapter = self.model
+        for path_fragment in yaml_path:
+            if isinstance(path_fragment, ListIndex):
+                list_annotation = self._get_field_list_item_annotation(model_chapter)
 
-                    self._iter_model_and_inject_field_headers(
-                        yaml_content="",
-                        current_obj=list_item_annotation,
-                        parent_path=parent_path,
-                    )
-
-                    print("is a list", key, field.annotation)
-                    # check if there is a object type in the list
-                elif self._has_dict_annotation(field):
-                    dict_items_annotation = self._get_field_dict_item_annotation(field)
-                    print("is a dict", key, field.annotation)
-                elif self._has_subclass_annotation(field):
-                    print("is subclass", key, field.annotation)
+                if len(list_annotation) == 1 and issubclass(
+                    list_annotation[0], (BaseModel, BaseSettings)
+                ):
+                    # we a nested setting class in a list
+                    container_model_hierachy.append({list_annotation[0]: path_fragment})
+                    model_chapter = list_annotation[0]
                 else:
-                    print("is other", key, field.annotation)
-                # print(key, field.annotation)
-                # find field in yaml file.
-                # walk annotations like list of objects etc
-                # check if there are any meta data in sub objects
-                # good luck
-            exit()
-
-    def _inject_comment(self, key: str, field: fields.FieldInfo, depth: int = 0):
-        new_yaml = ""
-        for line in self.yaml.split("\n"):
-            line_no_indent = line.lstrip()
-            line_depth = int((len(line) - len(line_no_indent)) / 2)
-            if line_depth != depth or not line_no_indent.startswith(
-                key, field, depth=depth
+                    # we have just a list with no meta info or some other construct we can not or dont want to deconstruct any furthr
+                    return None, None
+            elif (
+                hasattr(model_chapter, "model_fields")
+                and path_fragment in model_chapter.model_fields
             ):
-                new_yaml += line + "\n"
-            elif line_no_indent.startswith(key, field, depth=depth):
-                new_yaml += self.get_field_comment(
-                    key,
+                container_model_hierachy.append(
+                    {model_chapter.__class__: path_fragment}
                 )
-                new_yaml += line + "\n"
-        self.yaml = new_yaml
+                model_chapter = model_chapter.model_fields[path_fragment]
+        return container_model_hierachy, model_chapter
+
+    def generate_comment(
+        self,
+        line: str,
+        path: List[ListIndex | str],
+        key: str,
+        field: FieldInfoContainer,
+        indent_depth: int = 0,
+    ):
+        print("-------")
+
+        print(line, key, path)
+        return f"""#
+"""
 
     def get_field_comment(self, key: str, field: fields.FieldInfo, depth=0):
         line_indent = f"{' '*depth}"
@@ -391,8 +440,9 @@ class YamlCommentInjector:
     def _get_field_list_item_annotation(self, field: fields.FieldInfo) -> Tuple[Any]:
         if field.annotation == list:
             return tuple()
-        else:
+        elif hasattr(field.annotation, "__args__"):
             return field.annotation.__args__
+        return tuple()
 
     def _has_dict_annotation(self, field: fields.FieldInfo):
         annotation = field.annotation
@@ -412,6 +462,19 @@ class YamlCommentInjector:
         annotation = field.annotation
         if isinstance(annotation, type) and issubclass(
             annotation, (BaseSettings, BaseModel)
+        ):
+            return True
+        return False
+
+    def _has_scalar_value(self, field: fields.FieldInfo):
+        scalar_types = (bool, str, int, float, complex)
+        annotation = field.annotation
+        if isinstance(annotation, scalar_types) and issubclass(
+            annotation, scalar_types
+        ):
+            return True
+        elif (
+            hasattr(annotation, "__origin__") and annotation.__origin__ is scalar_types
         ):
             return True
         return False

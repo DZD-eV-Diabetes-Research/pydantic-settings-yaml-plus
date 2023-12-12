@@ -60,7 +60,7 @@ class FieldInfoContainer:
             list(parent_model.values())[0]
             for parent_model in self.container_model_hierachy
         ]
-        return env_var_delimiter.join([env_prefix + k.upper() for k in keys])
+        return env_var_delimiter.join([env_prefix + str(k).upper() for k in keys])
 
     @property
     def json_model_schema(self) -> Dict:
@@ -126,6 +126,7 @@ class FieldInfoContainer:
         Returns:
             List[Any]: List of allowed values for the field
         """
+
         if (
             self.field_info is None
             or "enum"

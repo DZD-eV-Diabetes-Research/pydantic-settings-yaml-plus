@@ -99,4 +99,52 @@ def remove_ml_indi():
         print(tr)
 
 
-remove_ml_indi()
+# remove_ml_indi()
+
+
+def anno_exploder():
+    from typing import get_args, get_origin, _GenericAlias, Union, Dict, List, Any
+    from pydantic import BaseModel
+
+    def explode_field_annotation(annotation) -> List[Any]:
+        annotation_path = []
+        if get_origin(annotation) is Union:
+            # warning. no union supported
+            raise NotImplementedError(
+                "Union annotation is not supported. please remove it from your config model if you want to use pydantic-settings-yaml-plus"
+            )
+        elif annotation.__class__ == _GenericAlias:
+            annotation_path.append(annotation.__origin__)
+        else:
+            annotation_path.append(annotation)
+        for arg in get_args(annotation):
+            annotation_path.extend(explode_field_annotation(arg))
+
+        return annotation_path
+        if (
+            hasattr(annotation, "__origin__")
+            and hasattr(annotation, "__args__")
+            and 1 == 2
+        ):
+            if annotation.__origin__ == list:
+                return [annotation.__origin__] + [
+                    arg
+                    for arg in annotation.__args__
+                    for t in explode_field_annotation(arg)
+                ]
+            return [annotation.__origin__] + [
+                t for t in explode_field_annotation(annotation.__args__[0])
+            ]
+        else:
+            return [annotation]
+
+    class SomeModel(BaseModel):
+        a: int = 1
+
+    annotation = Dict[str, List[int]]
+    annotation2 = Dict[str, list]
+    annotation1 = Union[List[int], List[str]]
+    print(explode_field_annotation(annotation=annotation))
+
+
+anno_exploder()

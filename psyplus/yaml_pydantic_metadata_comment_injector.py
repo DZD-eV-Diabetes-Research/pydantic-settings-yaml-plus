@@ -1,5 +1,6 @@
 from pydantic import BaseModel, fields
 from pydantic_settings import BaseSettings
+from typing import get_args, get_origin, _GenericAlias, Union
 from typing import (
     List,
     Dict,
@@ -15,6 +16,7 @@ from typing_extensions import Self
 import yaml
 from psyplus.field_info_container import FieldInfoContainer
 from dataclasses import dataclass
+from pydantic_core import PydanticUndefined
 
 
 class YamlNullVal:
@@ -28,6 +30,9 @@ YAML_BLOCK_SCALAR_INDICATOR = (">", "|", ">-", "|-", ">+", "|+")
 @dataclass
 class ListIndex:
     index: int
+
+    def __str__(self):
+        return f"_{self.index}_"
 
 
 @dataclass
@@ -56,7 +61,7 @@ class YamlLine:
 
     @property
     def parent_key_line(self) -> Self | None:
-        # The most previous line that is a higher in the tree hirarchy
+        # The first previous line that is a higher in the tree hirarchy
         if self.depth == 0 and not self.line_no_indent.startswith("- "):
             return None
         current_line = self
@@ -348,15 +353,15 @@ class YamlFile:
             self.lines.append(line)
 
 
-class YamlCommentInjector:
+class YamlPydanticMetadataCommentInjector:
     def __init__(self, yaml: str, model: BaseSettings | BaseModel):
-        self.yaml: YamlFile = YamlFile(yaml)
+        self.source_yaml: YamlFile = YamlFile(yaml)
         self.model: BaseSettings = model
+        self._inject_field_headers()
+        self.output_yaml: str = self._generate_output_yaml()
 
-    def inject_field_headers(self) -> str:
-        # print("model", self.model)
-        print(self.yaml.input_yaml)
-        for line in self.yaml.lines:
+    def _inject_field_headers(self) -> str:
+        for line in self.source_yaml.lines:
             parent_model_path, field_info = self._get_model_field_by_yaml_path(
                 line.path
             )
@@ -367,76 +372,126 @@ class YamlCommentInjector:
                     field_info=field_info,
                     container_model_hierachy=parent_model_path,
                 )
-                line.leading_comment = self.generate_comment(
-                    line=line.line_raw,
-                    path=line.path,
-                    key=line.line_key,
-                    field=field_info_wrapper,
+                line.leading_comment = self._indent_text(
+                    self._generate_comment(
+                        yaml_line=line.line_raw,
+                        path=line.path,
+                        key=line.line_key,
+                        field=field_info_wrapper,
+                    ),
                     indent_depth=line.indent_depth,
                 )
 
-            ### TODO you are here. match yaml line path to model path and extract metadat from model for comments generation
-        exit()
+    def _generate_output_yaml(self):
+        output = ""
+        for line in self.source_yaml.lines:
+            if line.leading_comment:
+                output += line.leading_comment
+            output += line.line_raw
+        return output
 
     def _get_model_field_by_yaml_path(
         self,
         yaml_path: List[str | ListIndex],
     ) -> Tuple[List[Dict[Type[BaseSettings], str]] | None, fields.FieldInfo | None]:
         container_model_hierachy: List[Dict[Type[BaseSettings], str]] = []
-        model_chapter_parent = None
         model_chapter = self.model
-        for path_fragment in yaml_path:
+        for index, path_fragment in enumerate(yaml_path):
             if isinstance(path_fragment, ListIndex):
                 list_annotation = self._get_field_list_item_annotation(model_chapter)
 
                 if len(list_annotation) == 1 and issubclass(
                     list_annotation[0], (BaseModel, BaseSettings)
                 ):
-                    # we a nested setting class in a list
+                    # we have a nested setting class in a list
                     container_model_hierachy.append({list_annotation[0]: path_fragment})
                     model_chapter = list_annotation[0]
                 else:
                     # we have just a list with no meta info or some other construct we can not or dont want to deconstruct any furthr
                     return None, None
             elif (
-                hasattr(model_chapter, "model_fields")
+                issubclass(model_chapter.__class__, (BaseModel, BaseSettings))
                 and path_fragment in model_chapter.model_fields
             ):
                 container_model_hierachy.append(
                     {model_chapter.__class__: path_fragment}
                 )
+
                 model_chapter = model_chapter.model_fields[path_fragment]
+            elif isinstance(model_chapter, fields.FieldInfo):
+                container_model_hierachy.append(
+                    {model_chapter.annotation: path_fragment}
+                )
+                return container_model_hierachy, model_chapter
         return container_model_hierachy, model_chapter
 
-    def generate_comment(
+    def explode_field_annotation(self, annotation) -> List[Any]:
+        annotation_path = []
+        if get_origin(annotation) is Union:
+            # warning. no union supported
+            raise NotImplementedError(
+                "Union annotation is not supported. please remove it from your config model if you want to use pydantic-settings-yaml-plus"
+            )
+        elif annotation.__class__ == _GenericAlias:
+            annotation_path.append(annotation.__origin__)
+        else:
+            annotation_path.append(annotation)
+        for arg in get_args(annotation):
+            annotation_path.extend(self.explode_field_annotation(arg))
+
+        return annotation_path
+
+    def _generate_comment(
         self,
-        line: str,
+        yaml_line: str,
         path: List[ListIndex | str],
         key: str,
         field: FieldInfoContainer,
-        indent_depth: int = 0,
     ):
-        print("-------")
-        # you are here. form the comment.
-        # you may need the indtend format (e.g. "  ") from the parent
-        print(line, key, path)
-        return f"""#
-"""
+        print("----")
+        print("key", key)
+        print("path", path)
+        print("object_path", field.container_model_hierachy)
+        print("field.field_info", field.field_info)
+        comment = ""
+        comment += f"### {'.'.join(str(p) for p in path)}"
+        if hasattr(field.field_info, "title"):
+            comment += f"{field.field_info.title}  ###"
+        if (
+            hasattr(field.field_info, "default")
+            and field.field_info.default != PydanticUndefined
+        ):
+            comment += f"# Defaults to '{field.field_info.default if not None else 'null/None'}'"
+        if field.field_value_enum:
+            comment += f"# Allowed values: {field.field_value_enum}"
+        """
+        if field.field_info.metadata:
+            comment += f"# Constraints: {field.field_info.metadata}"
+        """
+        comment += f"# Env var name: '{field.env_var_name}'"
+        if field.field_info.description:
+            comment += f"# Description: {field.field_info.description}"
+        if field.field_info.examples:
+            comment += self._generate_examples_comment_text(field)
+        return comment
 
-    def get_field_comment(self, key: str, field: fields.FieldInfo, depth=0):
-        line_indent = f"{' '*depth}"
-        comment_lines = []
-        comment_lines.append(f"### {key} {' - '+field.title if field.title else ''}")
+    def _generate_examples_comment_text(self, field: FieldInfoContainer):
+        if not field.field_info.examples:
+            return None
+        text_lines = []
+        for index, example in enumerate(field.field_info.examples):
+            text_lines.append(f"# Example No. {index}:")
+            # todo: this is uncompleted
+            text_lines.append(f"# > {example}")
+        return "\n".join(text_lines)
 
-        return "\n" + "\n".join([f"{line_indent}{line}" for line in comment_lines])
-
-    def _has_list_annotation(self, field: fields.FieldInfo):
-        annotation = field.annotation
-        if isinstance(annotation, type) and issubclass(annotation, list):
-            return True
-        elif hasattr(annotation, "__origin__") and annotation.__origin__ is list:
-            return True
-        return False
+    def _indent_text(self, text: str, indent_depth: int = 0):
+        lines = text.split("\n")
+        indented_lines = []
+        indent_space = self.source_yaml.indent * indent_depth
+        for line in lines:
+            indented_lines.append(f"{indent_space}{line}")
+        return "\n".join(indented_lines)
 
     def _get_field_list_item_annotation(self, field: fields.FieldInfo) -> Tuple[Any]:
         if field.annotation == list:
@@ -445,6 +500,15 @@ class YamlCommentInjector:
             return field.annotation.__args__
         return tuple()
 
+    """dead code
+    def _has_list_annotation(self, field: fields.FieldInfo):
+        annotation = field.annotation
+        if isinstance(annotation, type) and issubclass(annotation, list):
+            return True
+        elif hasattr(annotation, "__origin__") and annotation.__origin__ is list:
+            return True
+        return False
+    
     def _has_dict_annotation(self, field: fields.FieldInfo):
         annotation = field.annotation
         if isinstance(annotation, type) and issubclass(annotation, dict):
@@ -452,13 +516,13 @@ class YamlCommentInjector:
         elif hasattr(annotation, "__origin__") and annotation.__origin__ is dict:
             return True
         return False
-
+    
     def _get_field_dict_item_annotation(self, field: fields.FieldInfo) -> Tuple[Any]:
         if field.annotation == dict:
             return tuple()
         else:
             return field.annotation.__args__
-
+    
     def _has_subclass_annotation(self, field: fields.FieldInfo):
         annotation = field.annotation
         if isinstance(annotation, type) and issubclass(
@@ -479,3 +543,4 @@ class YamlCommentInjector:
         ):
             return True
         return False
+    """

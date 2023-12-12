@@ -111,13 +111,16 @@ class YamlSettings:
         if replace_pattern is None:
             replace_pattern = {}
         yaml_content: str = yaml.dump(config.model_dump(), sort_keys=False)
-        from psyplus.yaml_comment_injector import YamlCommentInjector, YamlFile
+        from psyplus.yaml_pydantic_metadata_comment_injector import (
+            YamlPydanticMetadataCommentInjector,
+            YamlFile,
+        )
 
         YamlFile(yaml=yaml_content)
 
-        yaml_content_with_comment = YamlCommentInjector(
+        yaml_content_with_comment = YamlPydanticMetadataCommentInjector(
             yaml=yaml_content, model=config
-        ).inject_field_headers()
+        )._inject_field_headers()
 
         with open(self.config_file, "w") as file:
             lines = []

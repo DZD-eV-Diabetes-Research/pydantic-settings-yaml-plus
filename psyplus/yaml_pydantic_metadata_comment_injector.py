@@ -362,7 +362,7 @@ class YamlPydanticMetadataCommentInjector:
 
     def _inject_field_headers(self) -> str:
         for line in self.source_yaml.lines:
-            parent_model_path, field_info = self._get_model_field_by_yaml_path(
+            parent_model_path, field_info = self._get_model_hierarchy_by_yaml_path(
                 line.path
             )
 
@@ -390,12 +390,30 @@ class YamlPydanticMetadataCommentInjector:
             output += line.line_raw
         return output
 
-    def _get_model_field_by_yaml_path(
+    def _get_model_hierarchy_by_yaml_path(
         self,
         yaml_path: List[str | ListIndex],
-    ) -> Tuple[List[Dict[Type[BaseSettings], str]] | None, fields.FieldInfo | None]:
-        container_model_hierachy: List[Dict[Type[BaseSettings], str]] = []
+    ) -> List[Type[BaseSettings | _GenericAlias] | str | fields.FieldInfo]:
+        container_model_hierachy: List[
+            Type[BaseSettings | _GenericAlias] | str | fields.FieldInfo
+        ] = []
         model_chapter = self.model
+        for index, path_fragment in enumerate(yaml_path):
+            if isinstance(model_chapter, (BaseModel, BaseSettings)):
+                print("INSTANCE", model_chapter)
+                container_model_hierachy.append(model_chapter.__class__)
+                if path_fragment in model_chapter.model_fields:
+                    model_chapter = model_chapter.model_fields[path_fragment].annotation
+                    container_model_hierachy.append(path_fragment)
+                    continue
+            elif issubclass(model_chapter, (BaseModel, BaseSettings)):
+                print("SUBCLASS", model_chapter)
+                container_model_hierachy.extend(
+                    self.explode_field_annotation(model_chapter)
+                )
+        print(container_model_hierachy)
+        exit()
+        return container_model_hierachy
         for index, path_fragment in enumerate(yaml_path):
             if isinstance(path_fragment, ListIndex):
                 list_annotation = self._get_field_list_item_annotation(model_chapter)

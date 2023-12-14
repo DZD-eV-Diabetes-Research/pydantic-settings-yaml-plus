@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from pydantic import fields
+from pydantic import fields, BaseModel
 from pydantic_settings import BaseSettings
 import yaml
 from typing import List, Any, Dict, Type, Literal
@@ -25,7 +25,11 @@ class FieldInfoContainer:
     @property
     def parent_container_model(self) -> BaseSettings:
         """The pydantic settings model that contains the field"""
-        return list(self.container_model_hierachy[-1].keys())[0]
+        print("self.container_model_hierachy", self.container_model_hierachy)
+        for parent_obj in reversed(self.container_model_hierachy):
+            if isinstance(parent_obj, (BaseSettings, BaseModel)):
+                return parent_obj
+        # return list(self.container_model_hierachy[-1].keys())[0]
 
     @property
     def base_container_model(self) -> BaseSettings:

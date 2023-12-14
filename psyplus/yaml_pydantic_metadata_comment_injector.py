@@ -362,14 +362,14 @@ class YamlPydanticMetadataCommentInjector:
 
     def _inject_field_headers(self) -> str:
         for line in self.source_yaml.lines:
-            parent_model_path, field_info = self._get_model_hierarchy_by_yaml_path(
-                line.path
-            )
+            parent_model_path = self._get_model_hierarchy_by_yaml_path(line.path)
 
-            if field_info is not None:
+            if parent_model_path and isinstance(
+                parent_model_path[-1], fields.FieldInfo
+            ):
                 field_info_wrapper = FieldInfoContainer(
                     field_name=line.line_key,
-                    field_info=field_info,
+                    field_info=parent_model_path[-1],
                     container_model_hierachy=parent_model_path,
                 )
                 line.leading_comment = self._indent_text(
@@ -408,11 +408,14 @@ class YamlPydanticMetadataCommentInjector:
                     continue
             elif issubclass(model_chapter, (BaseModel, BaseSettings)):
                 print("SUBCLASS", model_chapter)
+            else:
+                print("ELSE", model_chapter)
                 container_model_hierachy.extend(
                     self.explode_field_annotation(model_chapter)
                 )
+                model_chapter = container_model_hierachy[-1]
         print(container_model_hierachy)
-        exit()
+
         return container_model_hierachy
         for index, path_fragment in enumerate(yaml_path):
             if isinstance(path_fragment, ListIndex):

@@ -11,6 +11,19 @@ JSON_BASIC_TYPES = Literal["boolean", "number", "string", "array", "object"]
 # https://datatracker.ietf.org/doc/html/draft-bhutton-json-schema-00#section-10.2.1
 JSON_SUBSCHEMAS = Literal["allOf", "anyOf", "oneOf", "not"]
 
+from psyplus import explode_field_annotation
+
+
+@dataclass
+class ModelPathMember:
+    model: BaseModel | BaseSettings
+    key: str
+    field: fields.FieldInfo
+
+    @property
+    def field_annotation_exploded(self):
+        return explode_field_annotation(self.field.annotation)
+
 
 @dataclass
 class FieldInfoContainer:
@@ -19,7 +32,7 @@ class FieldInfoContainer:
 
     field_name: str
     field_info: fields.FieldInfo
-    container_model_hierachy: List[Dict[Type[BaseSettings], str]]
+    container_model_hierachy: List[ModelPathMember]
     # env_var_name: str
 
     @property
@@ -32,9 +45,9 @@ class FieldInfoContainer:
         # return list(self.container_model_hierachy[-1].keys())[0]
 
     @property
-    def base_container_model(self) -> BaseSettings:
+    def root_container_model(self) -> BaseSettings:
         """The root model that contains the container with the field. Can be the same as 'parent_container_model'"""
-        return list(self.container_model_hierachy[0].keys())[0]
+        return self.container_model_hierachy[0]
 
     @property
     def path(self) -> List[str]:
@@ -51,13 +64,13 @@ class FieldInfoContainer:
     @property
     def env_var_name(self) -> str:
         env_var_delimiter: str = (
-            self.base_container_model.model_config["env_nested_delimiter"]
-            if self.base_container_model.model_config["env_nested_delimiter"]
+            self.root_container_model.model_config["env_nested_delimiter"]
+            if self.root_container_model.model_config["env_nested_delimiter"]
             else "__"
         )
         env_prefix: str = (
-            self.base_container_model.model_config["env_prefix"]
-            if self.base_container_model.model_config["env_prefix"]
+            self.root_container_model.model_config["env_prefix"]
+            if self.root_container_model.model_config["env_prefix"]
             else ""
         )
         keys: List[str] = [

@@ -13,6 +13,9 @@ from typing import (
     Optional,
     Mapping,
     Awaitable,
+    get_origin,
+    get_args,
+    _GenericAlias,
 )
 import inspect
 from functools import singledispatch
@@ -378,3 +381,20 @@ class YamlSettings:
             return val.model_dump_json()
         else:
             return str(val)
+
+
+def explode_field_annotation(self, annotation) -> List[Any]:
+    annotation_path = []
+    if get_origin(annotation) is Union:
+        # warning. no union supported
+        raise NotImplementedError(
+            "Union annotation is not supported. please remove it from your config model if you want to use pydantic-settings-yaml-plus"
+        )
+    elif annotation.__class__ == _GenericAlias:
+        annotation_path.append(annotation.__origin__)
+    else:
+        annotation_path.append(annotation)
+    for arg in get_args(annotation):
+        annotation_path.extend(self.explode_field_annotation(arg))
+
+    return annotation_path

@@ -14,7 +14,8 @@ from typing import (
 )
 from typing_extensions import Self
 import yaml
-from psyplus.field_info_container import FieldInfoContainer
+from psyplus import explode_field_annotation
+from psyplus.field_info_container import FieldInfoContainer, ModelPathMember
 from dataclasses import dataclass
 from pydantic_core import PydanticUndefined
 
@@ -362,15 +363,15 @@ class YamlPydanticMetadataCommentInjector:
 
     def _inject_field_headers(self) -> str:
         for line in self.source_yaml.lines:
-            parent_model_path = self._get_model_hierarchy_by_yaml_path(line.path)
+            field_root_model_path = self._get_model_hierarchy_by_yaml_path(line.path)
 
-            if parent_model_path and isinstance(
-                parent_model_path[-1], fields.FieldInfo
+            if field_root_model_path and isinstance(
+                field_root_model_path[-1], fields.FieldInfo
             ):
                 field_info_wrapper = FieldInfoContainer(
                     field_name=line.line_key,
-                    field_info=parent_model_path[-1],
-                    container_model_hierachy=parent_model_path,
+                    field_info=field_root_model_path[-1],
+                    container_model_hierachy=field_root_model_path,
                 )
                 line.leading_comment = self._indent_text(
                     self._generate_comment(
@@ -398,22 +399,38 @@ class YamlPydanticMetadataCommentInjector:
             Type[BaseSettings | _GenericAlias] | str | fields.FieldInfo
         ] = []
         model_chapter = self.model
+
+        print("-----", yaml_path)
         for index, path_fragment in enumerate(yaml_path):
+            # print("model_chapter",model_chapter)
+            print("# path_fragment", path_fragment)
             if isinstance(model_chapter, (BaseModel, BaseSettings)):
-                print("INSTANCE", model_chapter)
-                container_model_hierachy.append(model_chapter.__class__)
+                print("INSTANCE", model_chapter.__class__)
                 if path_fragment in model_chapter.model_fields:
+                    model_path_member = ModelPathMember(
+                        model=model_chapter.__class__,
+                        key=path_fragment,
+                        field=model_chapter.model_fields[path_fragment],
+                    )
                     model_chapter = model_chapter.model_fields[path_fragment].annotation
-                    container_model_hierachy.append(path_fragment)
+                    container_model_hierachy.append(model_path_member)
                     continue
-            elif issubclass(model_chapter, (BaseModel, BaseSettings)):
-                print("SUBCLASS", model_chapter)
+            elif isinstance(path_fragment, ListIndex):
+                print("LIST_SKIP")
+                continue
             else:
                 print("ELSE", model_chapter)
-                container_model_hierachy.extend(
-                    self.explode_field_annotation(model_chapter)
-                )
+                for annotation_fragment in reversed(
+                    explode_field_annotation(model_chapter)
+                ):
+                    if issubclass(model_chapter, BaseModel) or issubclass(
+                        model_chapter, BaseSettings
+                    ):
+                        model_chapter = annotation_fragment
+
+                container_model_hierachy.extend(explode_field_annotation(model_chapter))
                 model_chapter = container_model_hierachy[-1]
+        print("######")
         print(container_model_hierachy)
 
         return container_model_hierachy
@@ -445,22 +462,6 @@ class YamlPydanticMetadataCommentInjector:
                 )
                 return container_model_hierachy, model_chapter
         return container_model_hierachy, model_chapter
-
-    def explode_field_annotation(self, annotation) -> List[Any]:
-        annotation_path = []
-        if get_origin(annotation) is Union:
-            # warning. no union supported
-            raise NotImplementedError(
-                "Union annotation is not supported. please remove it from your config model if you want to use pydantic-settings-yaml-plus"
-            )
-        elif annotation.__class__ == _GenericAlias:
-            annotation_path.append(annotation.__origin__)
-        else:
-            annotation_path.append(annotation)
-        for arg in get_args(annotation):
-            annotation_path.extend(self.explode_field_annotation(arg))
-
-        return annotation_path
 
     def _generate_comment(
         self,

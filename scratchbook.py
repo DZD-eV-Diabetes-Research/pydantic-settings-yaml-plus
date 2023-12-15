@@ -147,4 +147,38 @@ def anno_exploder():
     print(explode_field_annotation(annotation=annotation))
 
 
-anno_exploder()
+# anno_exploder()
+
+
+def pydantic_to_dict_nested():
+    from typing import Any, List, Dict
+    from pydantic import BaseModel
+    from pydantic_settings import BaseSettings
+    import yaml
+
+    def pydantic_to_dict(obj: Any) -> Any:
+        if isinstance(obj, (BaseModel, BaseSettings)):
+            return pydantic_to_dict(obj.dict())
+        elif isinstance(obj, dict):
+            return {k: pydantic_to_dict(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [pydantic_to_dict(item) for item in obj]
+        else:
+            return obj
+
+    class ExternalSubClass(BaseModel):
+        test: Any
+        test_simple_list: List[str]
+        test_simple_dict: Dict[int, str]
+
+    v = {
+        "a": ExternalSubClass(
+            test="a value",
+            test_simple_list=["a", "b", "c"],
+            test_simple_dict={1: "a"},
+        )
+    }
+    print(yaml.dump(pydantic_to_dict(v), sort_keys=False))
+
+
+pydantic_to_dict_nested()

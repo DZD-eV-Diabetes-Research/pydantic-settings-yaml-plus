@@ -11,18 +11,32 @@ JSON_BASIC_TYPES = Literal["boolean", "number", "string", "array", "object"]
 # https://datatracker.ietf.org/doc/html/draft-bhutton-json-schema-00#section-10.2.1
 JSON_SUBSCHEMAS = Literal["allOf", "anyOf", "oneOf", "not"]
 
-from psyplus import explode_field_annotation
-
 
 @dataclass
 class ModelPathMember:
-    model: BaseModel | BaseSettings
+    model_instance: BaseModel | BaseSettings | List[Any] | Dict[str, Any]
     key: str
-    field: fields.FieldInfo
+    # field: fields.FieldInfo
 
     @property
-    def field_annotation_exploded(self):
-        return explode_field_annotation(self.field.annotation)
+    def field_info(self) -> fields.FieldInfo | None:
+        if isinstance(self.model_instance, (BaseModel, BaseSettings)):
+            return self.model_instance.model_fields[self.key]
+        return None
+
+    @property
+    def model_class(
+        self,
+    ) -> Type[BaseModel] | Type[BaseSettings] | Type[List] | Type[List]:
+        if isinstance(self.model_instance, (BaseModel, BaseSettings)):
+            return self.model_instance.__class__
+        return None
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        return f"ModelPathMember(model={self.model_instance.__class__ if isinstance(self.model_instance, (BaseModel, BaseSettings)) else self.model_instance },key={self.key},field_info={self.field_info})"
 
 
 @dataclass
@@ -31,27 +45,48 @@ class FieldInfoContainer:
     Intended for internal use only"""
 
     field_name: str
-    field_info: fields.FieldInfo
+    # field_info: fields.FieldInfo
     container_model_hierachy: List[ModelPathMember]
     # env_var_name: str
 
+    def get_env_var_scheme(
+        self, env_var_delimiter: str = "__", prefix: str = ""
+    ) -> str:
+        result = []
+        for member in self.container_model_hierachy:
+            if isinstance(member.model_instance, (BaseModel, BaseSettings)):
+                result.append(member.key.upper())
+            elif member.model_instance == list:
+                result.append("<LISTINDEX>")
+            elif member.model_instance == dict:
+                result.append("<DICTKEY>")
+            else:
+                # unsupported type; we can not generate a env var
+                return None
+        return prefix + env_var_delimiter.join(result)
+
     @property
-    def parent_container_model(self) -> BaseSettings:
+    def field_info(self):
+        top_member = self.container_model_hierachy[-1]
+        return top_member.model_instance.model_fields[top_member.key]
+
+    @property
+    def parent_container_model(self) -> BaseSettings | BaseModel:
         """The pydantic settings model that contains the field"""
         print("self.container_model_hierachy", self.container_model_hierachy)
         for parent_obj in reversed(self.container_model_hierachy):
-            if isinstance(parent_obj, (BaseSettings, BaseModel)):
-                return parent_obj
+            if isinstance(parent_obj.model_instance, (BaseSettings, BaseModel)):
+                return parent_obj.model_instance
         # return list(self.container_model_hierachy[-1].keys())[0]
 
     @property
-    def root_container_model(self) -> BaseSettings:
+    def root_container_model(self) -> BaseSettings | BaseModel:
         """The root model that contains the container with the field. Can be the same as 'parent_container_model'"""
-        return self.container_model_hierachy[0]
+        return self.container_model_hierachy[0].model_instance
 
     @property
     def path(self) -> List[str]:
-        """If the field has parent containers, return the field name of the parent container and its parents.
+        """If the field has parent containers, return the tfield name of the parent container and its parens.
 
         Returns:
             str: The path as a list of strings
@@ -73,11 +108,9 @@ class FieldInfoContainer:
             if self.root_container_model.model_config["env_prefix"]
             else ""
         )
-        keys: List[str] = [
-            list(parent_model.values())[0]
-            for parent_model in self.container_model_hierachy
-        ]
-        return env_var_delimiter.join([env_prefix + str(k).upper() for k in keys])
+        return self.get_env_var_scheme(
+            env_var_delimiter=env_var_delimiter, prefix=env_prefix
+        )
 
     @property
     def json_model_schema(self) -> Dict:

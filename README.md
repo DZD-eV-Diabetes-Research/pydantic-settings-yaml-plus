@@ -16,6 +16,10 @@ A tiny helper class to use pydantic-settings to generate, read and comment your 
   * Add missing/new required values
 
 
-### To investigate
+### ToDo / ToInvestigate
 * What about date(times) support?
-* Support block values
+* Refactor / Remove dead code psyplus.YamlSettings
+* Make env vars work!
+* Remove debug prints
+* Write some basic tests
+* Make pypi package

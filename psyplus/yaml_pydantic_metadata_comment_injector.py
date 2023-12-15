@@ -1,27 +1,18 @@
-from pydantic import BaseModel, fields
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings
-from typing import get_args, get_origin, _GenericAlias, Union
 from typing import (
     List,
-    Dict,
-    Any,
     get_args,
-    Annotated,
-    get_type_hints,
-    Tuple,
     Generator,
-    Type,
 )
 from typing_extensions import Self
 import yaml
-from psyplus import explode_field_annotation
+
+from psyplus.utils import nested_pydantic_to_dict
 from psyplus.field_info_container import FieldInfoContainer, ModelPathMember
+
 from dataclasses import dataclass
 from pydantic_core import PydanticUndefined
-
-
-class YamlNullVal:
-    pass
 
 
 # https://yaml-multiline.info/
@@ -51,25 +42,16 @@ class YamlLine:
             return self.parent_yaml_file.lines[self_index - 1]
         return None
 
-    """dead code?
-    @property
-    def next_line(self) -> Self | None:
-        self_index = self.parent_yaml_file.lines.index(self)
-        if self_index + 1 < len(self.parent_yaml_file.lines):
-            return self.parent_yaml_file.lines[self_index + 1]
-        return None
-    """
-
     @property
     def parent_key_line(self) -> Self | None:
         # The first previous line that is a higher in the tree hirarchy
-        if self.depth == 0 and not self.line_no_indent.startswith("- "):
+
+        if self.depth == 0 and not self.is_list_item:
             return None
+        if self.is_list_item:
+            return self.list_item_first_sibling_line.previous_line
         current_line = self
-        parent_found = False
-        while not parent_found:
-            if current_line.is_list_item:
-                return current_line.list_item_first_sibling_line.previous_line
+        while True:
             prev = current_line.previous_line
             if prev is None:
                 return None
@@ -77,19 +59,6 @@ class YamlLine:
                 return prev
             else:
                 current_line = prev
-
-    """dead code?
-    @property
-    def is_list_key(self) -> bool:
-        # has this line a key and is the value to this key a list
-        if self.line_scalar_value in ("[]", []):
-            return True
-        if not self.line_scalar_value and self.next_line.is_list_item:
-            print("IS LIST:", self.line_raw, self.line_key)
-            return True
-        print("NOT A LIST", self.line_key, self.line_scalar_value)
-        return False
-    """
 
     @property
     def is_list_item(self) -> bool:
@@ -125,11 +94,11 @@ class YamlLine:
             # hey, we are the leading list item. that was easy
             return self
         previous_line = self.previous_line
-
         while True:
             if previous_line is None:
                 return None
-            elif (
+
+            if (
                 previous_line.indent_depth == self.indent_depth - 1
                 and previous_line.line_no_indent.startswith("- ")
             ):
@@ -139,14 +108,13 @@ class YamlLine:
                 and not previous_line.line_no_indent.startswith("- ")
             ):
                 # we are walked up in the hirachy but there is no list item. seems we are not in a list
+
                 return None
             else:
                 previous_line = previous_line.previous_line
 
     def walk_back_list_item_lines(self) -> Generator[Self, None, None]:
         # iter list to the begining. starting from the from the 'self'-item
-        # TODO: TEST THIS and then use it in depth
-
         # if part of a list return the first item of this list
         if self.is_list_item:
             source_leading_list_item_attr_line = self.list_item_leading_attr_line
@@ -160,10 +128,9 @@ class YamlLine:
                     != source_leading_list_item_attr_line.indent_depth
                 ):
                     # we left the origin list or there is no more list item
-
                     return None
                 if leading_list_item_attr_line is None:
-                    return
+                    return None
                 yield leading_list_item_attr_line
                 # catch previous list item if exists
                 prev_line = leading_list_item_attr_line.previous_line
@@ -184,7 +151,12 @@ class YamlLine:
             return list_item_lines[-1]
 
     @property
-    def path(self) -> List[str | type(List)]:
+    def path(self) -> List[str | ListIndex]:
+        """Return the path in the yaml structure. similar to a json path
+
+        Returns:
+            _type_: _description_
+        """
         path = []
 
         iter_line = self
@@ -226,15 +198,6 @@ class YamlLine:
         if self.is_list_item and self.is_list_inline_style:
             indent_depth + 1
         return indent_depth
-
-    """dead code?
-    @property
-    def has_children(self) -> bool:
-        nl = self.next_line
-        if nl is not None and nl.depth > self.depth:
-            return True
-        return False
-    """
 
     @property
     def line_no_indent(self) -> str:
@@ -291,18 +254,6 @@ class YamlLine:
         ):
             return True
         return False
-
-    @property
-    def multiline_flow_scalar_first_line(self) -> str | None:
-        # if line is a multiline flow scalar value (https://yaml-multiline.info/)
-        # return the first line after the key.
-        # e.g.
-        #   example: 'Several lines of text,\n
-        #   ··containing ''single quotes''. Escapes (like \n) don''t do anything.\n'
-        # in this case this func will return `'Several lines of text,\n`
-        # will return None if line is not a multiline flow scalar
-        if self.initiates_multiline_value:
-            return
 
 
 class YamlFile:
@@ -365,204 +316,162 @@ class YamlPydanticMetadataCommentInjector:
         for line in self.source_yaml.lines:
             field_root_model_path = self._get_model_hierarchy_by_yaml_path(line.path)
 
-            if field_root_model_path and isinstance(
-                field_root_model_path[-1], fields.FieldInfo
+            if (
+                field_root_model_path
+                and field_root_model_path[-1].field_info is not None
             ):
                 field_info_wrapper = FieldInfoContainer(
                     field_name=line.line_key,
-                    field_info=field_root_model_path[-1],
+                    # field_info=field_root_model_path[-1],
                     container_model_hierachy=field_root_model_path,
                 )
-                line.leading_comment = self._indent_text(
-                    self._generate_comment(
-                        yaml_line=line.line_raw,
-                        path=line.path,
-                        key=line.line_key,
-                        field=field_info_wrapper,
-                    ),
-                    indent_depth=line.indent_depth,
+                line.leading_comment = "\n".join(
+                    self._indent_multilines(
+                        text=self._generate_comment(
+                            yaml_line=line,
+                            path=line.path,
+                            key=line.line_key,
+                            field=field_info_wrapper,
+                        ),
+                        indent_depth=line.indent_depth,
+                    )
                 )
 
     def _generate_output_yaml(self):
         output = ""
         for line in self.source_yaml.lines:
             if line.leading_comment:
-                output += line.leading_comment
-            output += line.line_raw
+                output += "\n" + line.leading_comment + "\n"
+            output += line.line_raw + "\n"
+            print("line.line_raw", line.line_raw)
+            if line.multiline_value:
+                for mlv in line.multiline_value[1:]:
+                    output += (
+                        f"{line.indent_depth * line.parent_yaml_file.indent}  {mlv}\n"
+                    )
         return output
 
     def _get_model_hierarchy_by_yaml_path(
         self,
         yaml_path: List[str | ListIndex],
-    ) -> List[Type[BaseSettings | _GenericAlias] | str | fields.FieldInfo]:
-        container_model_hierachy: List[
-            Type[BaseSettings | _GenericAlias] | str | fields.FieldInfo
-        ] = []
+    ) -> List[ModelPathMember]:
+        container_model_hierachy: List[ModelPathMember] = []
         model_chapter = self.model
 
-        print("-----", yaml_path)
-        for index, path_fragment in enumerate(yaml_path):
-            # print("model_chapter",model_chapter)
-            print("# path_fragment", path_fragment)
+        for path_fragment in yaml_path:
             if isinstance(model_chapter, (BaseModel, BaseSettings)):
-                print("INSTANCE", model_chapter.__class__)
                 if path_fragment in model_chapter.model_fields:
                     model_path_member = ModelPathMember(
-                        model=model_chapter.__class__,
+                        model_instance=model_chapter,
                         key=path_fragment,
-                        field=model_chapter.model_fields[path_fragment],
                     )
-                    model_chapter = model_chapter.model_fields[path_fragment].annotation
+                    model_chapter = getattr(model_chapter, path_fragment)
                     container_model_hierachy.append(model_path_member)
                     continue
             elif isinstance(path_fragment, ListIndex):
-                print("LIST_SKIP")
+                model_path_member = ModelPathMember(
+                    model_instance=List,
+                    key=path_fragment,
+                )
+                container_model_hierachy.append(model_path_member)
+                model_chapter = model_chapter[path_fragment.index]
                 continue
             else:
-                print("ELSE", model_chapter)
-                for annotation_fragment in reversed(
-                    explode_field_annotation(model_chapter)
+                if (
+                    container_model_hierachy[-1].field_info is not None
+                    and container_model_hierachy[-1].field_info.annotation.__origin__
+                    == dict
                 ):
-                    if issubclass(model_chapter, BaseModel) or issubclass(
-                        model_chapter, BaseSettings
-                    ):
-                        model_chapter = annotation_fragment
-
-                container_model_hierachy.extend(explode_field_annotation(model_chapter))
-                model_chapter = container_model_hierachy[-1]
-        print("######")
-        print(container_model_hierachy)
+                    dict_key_class = get_args(
+                        container_model_hierachy[-1].field_info.annotation
+                    )[0]
+                    model_path_member = ModelPathMember(
+                        model_instance=model_chapter,
+                        key=dict_key_class(path_fragment),
+                    )
+                    container_model_hierachy.append(model_path_member)
+                    model_chapter = model_chapter[dict_key_class(path_fragment)]
 
         return container_model_hierachy
-        for index, path_fragment in enumerate(yaml_path):
-            if isinstance(path_fragment, ListIndex):
-                list_annotation = self._get_field_list_item_annotation(model_chapter)
-
-                if len(list_annotation) == 1 and issubclass(
-                    list_annotation[0], (BaseModel, BaseSettings)
-                ):
-                    # we have a nested setting class in a list
-                    container_model_hierachy.append({list_annotation[0]: path_fragment})
-                    model_chapter = list_annotation[0]
-                else:
-                    # we have just a list with no meta info or some other construct we can not or dont want to deconstruct any furthr
-                    return None, None
-            elif (
-                issubclass(model_chapter.__class__, (BaseModel, BaseSettings))
-                and path_fragment in model_chapter.model_fields
-            ):
-                container_model_hierachy.append(
-                    {model_chapter.__class__: path_fragment}
-                )
-
-                model_chapter = model_chapter.model_fields[path_fragment]
-            elif isinstance(model_chapter, fields.FieldInfo):
-                container_model_hierachy.append(
-                    {model_chapter.annotation: path_fragment}
-                )
-                return container_model_hierachy, model_chapter
-        return container_model_hierachy, model_chapter
 
     def _generate_comment(
         self,
-        yaml_line: str,
+        yaml_line: YamlLine,
         path: List[ListIndex | str],
         key: str,
         field: FieldInfoContainer,
+        comment_prefixer="#",
     ):
-        print("----")
-        print("key", key)
-        print("path", path)
-        print("object_path", field.container_model_hierachy)
-        print("field.field_info", field.field_info)
-        comment = ""
-        comment += f"### {'.'.join(str(p) for p in path)}"
-        if hasattr(field.field_info, "title"):
-            comment += f"{field.field_info.title}  ###"
+        comment = []
+        key_path = ".".join(str(p) for p in path)
+        header_line = f"## {key}"
+        if key != key_path:
+            header_line += f" - {key_path}"
+        if field.field_info.title:
+            header_line += f" - {field.field_info.title}"
+        header_line += f" ###"
+        comment.append(header_line)
+
         if (
             hasattr(field.field_info, "default")
             and field.field_info.default != PydanticUndefined
         ):
-            comment += f"# Defaults to '{field.field_info.default if not None else 'null/None'}'"
+            comment.append(
+                f" Defaults to '{field.field_info.default if not None else 'null/None'}'"
+            )
         if field.field_value_enum:
-            comment += f"# Allowed values: {field.field_value_enum}"
+            comment.append(f" Allowed values: {field.field_value_enum}")
         """
         if field.field_info.metadata:
-            comment += f"# Constraints: {field.field_info.metadata}"
+            comment += f"Constraints: {field.field_info.metadata}"
         """
-        comment += f"# Env var name: '{field.env_var_name}'"
+        comment.append(f" Env var name: '{field.env_var_name}'")
         if field.field_info.description:
-            comment += f"# Description: {field.field_info.description}"
+            desc = field.field_info.description.split("\n")
+            desc[0] = f" Description: {desc[0]}"
+            desc = [desc[0]] + [" " * len(" Description:") + l for l in desc[1:]]
+            comment.extend(desc)
         if field.field_info.examples:
-            comment += self._generate_examples_comment_text(field)
+            comment.extend(self._generate_examples_comment_text(key, field, yaml_line))
+        comment = [comment_prefixer + l for l in comment]
         return comment
 
-    def _generate_examples_comment_text(self, field: FieldInfoContainer):
+    def _generate_examples_comment_text(
+        self, key: str, field: FieldInfoContainer, yaml_line: YamlLine
+    ):
         if not field.field_info.examples:
             return None
         text_lines = []
         for index, example in enumerate(field.field_info.examples):
-            text_lines.append(f"# Example No. {index}:")
+            text_lines.append(
+                f" Example No. {index+1}:"
+                if len(field.field_info.examples) > 1
+                else " Example:"
+            )
             # todo: this is uncompleted
-            text_lines.append(f"# > {example}")
-        return "\n".join(text_lines)
+            example_as_yaml = yaml.dump(nested_pydantic_to_dict({key: example}))
+            text_lines.extend(
+                self._indent_multilines(
+                    text=example_as_yaml.split("\n"),
+                    indent_depth=yaml_line.indent_depth,
+                    line_prefix=">",
+                    add_extra_indent_for_subsequent_lines_after_line_prefix=False,
+                )
+            )
 
-    def _indent_text(self, text: str, indent_depth: int = 0):
-        lines = text.split("\n")
-        indented_lines = []
-        indent_space = self.source_yaml.indent * indent_depth
-        for line in lines:
-            indented_lines.append(f"{indent_space}{line}")
-        return "\n".join(indented_lines)
+        return text_lines[:-1]
 
-    def _get_field_list_item_annotation(self, field: fields.FieldInfo) -> Tuple[Any]:
-        if field.annotation == list:
-            return tuple()
-        elif hasattr(field.annotation, "__args__"):
-            return field.annotation.__args__
-        return tuple()
-
-    """dead code
-    def _has_list_annotation(self, field: fields.FieldInfo):
-        annotation = field.annotation
-        if isinstance(annotation, type) and issubclass(annotation, list):
-            return True
-        elif hasattr(annotation, "__origin__") and annotation.__origin__ is list:
-            return True
-        return False
-    
-    def _has_dict_annotation(self, field: fields.FieldInfo):
-        annotation = field.annotation
-        if isinstance(annotation, type) and issubclass(annotation, dict):
-            return True
-        elif hasattr(annotation, "__origin__") and annotation.__origin__ is dict:
-            return True
-        return False
-    
-    def _get_field_dict_item_annotation(self, field: fields.FieldInfo) -> Tuple[Any]:
-        if field.annotation == dict:
-            return tuple()
-        else:
-            return field.annotation.__args__
-    
-    def _has_subclass_annotation(self, field: fields.FieldInfo):
-        annotation = field.annotation
-        if isinstance(annotation, type) and issubclass(
-            annotation, (BaseSettings, BaseModel)
-        ):
-            return True
-        return False
-
-    def _has_scalar_value(self, field: fields.FieldInfo):
-        scalar_types = (bool, str, int, float, complex)
-        annotation = field.annotation
-        if isinstance(annotation, scalar_types) and issubclass(
-            annotation, scalar_types
-        ):
-            return True
-        elif (
-            hasattr(annotation, "__origin__") and annotation.__origin__ is scalar_types
-        ):
-            return True
-        return False
-    """
+    def _indent_multilines(
+        self,
+        text: List[str],
+        indent_depth: int = 0,
+        line_prefix: str = "",
+        line_suffix: str = "",
+        add_extra_indent_for_subsequent_lines_after_line_prefix: bool = False,
+    ) -> Generator[str, None, None]:
+        indent = f"{indent_depth*self.source_yaml.indent}"
+        for index, line in enumerate(text):
+            line_prefix_real = line_prefix
+            if index != 0 and add_extra_indent_for_subsequent_lines_after_line_prefix:
+                line_prefix_real = f"{line_prefix}{self.source_yaml.indent}"
+            yield f"{indent}{line_prefix_real}{line}{line_suffix}"

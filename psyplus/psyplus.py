@@ -1,31 +1,24 @@
 import typing
-import asyncio
+
 from typing import (
     List,
     Any,
     Dict,
     Union,
-    Literal,
-    Tuple,
     Type,
-    Generator,
-    get_type_hints,
-    Optional,
-    Mapping,
-    Awaitable,
-    get_origin,
-    get_args,
-    _GenericAlias,
 )
 import inspect
-from functools import singledispatch
+
 from pydantic import BaseModel, fields
-from pydantic_core import PydanticUndefinedType
-import pydantic
+
+
 from pydantic_settings import BaseSettings
 from pydantic_core import PydanticUndefined
-from pathlib import Path, PurePath
+from pathlib import Path
+
 import yaml
+
+
 from dataclasses import dataclass
 from psyplus.field_info_container import FieldInfoContainer
 
@@ -69,7 +62,7 @@ class YamlSettings:
         dummy_values = self._get_fields_filler(
             required_only=True, use_example_values_if_exists=True
         )
-
+        print(dummy_values)
         config = self.model.model_validate(dummy_values)
         self._generate_file(
             config,
@@ -123,97 +116,18 @@ class YamlSettings:
 
         yaml_content_with_comment = YamlPydanticMetadataCommentInjector(
             yaml=yaml_content, model=config
-        )._inject_field_headers()
+        ).output_yaml
+        # print("yaml_content_with_comment", yaml_content_with_comment)
 
         with open(self.config_file, "w") as file:
             lines = []
+
             if not replace_pattern:
-                lines = yaml_content_with_comment
+                lines = yaml_content_with_comment.split("\n")
             else:
                 for line in yaml_content_with_comment:
                     for key, val in replace_pattern.items():
-                        lines.append(f"{line.replace(key, val)}\n")
-            for l in lines:
-                file.write(l + "\n")
-
-    def _generate_file_old(
-        self,
-        config: BaseSettings,
-        overwrite_existing: bool = False,
-        exists_ok: bool = False,
-        generate_with_optional_fields: bool = True,
-        comment_out_optional_fields: bool = True,
-        generate_with_comment_desc_header: bool = True,
-        generate_with_example_values: bool = False,
-        replace_pattern: Dict = None,
-    ):
-        self.config_file.parent.mkdir(exist_ok=True, parents=True)
-        if self.config_file.is_file() and not overwrite_existing:
-            if exists_ok:
-                return
-            else:
-                raise FileExistsError(
-                    f"Can not generate config file at {self.config_file}. File allready exists."
-                )
-        if replace_pattern is None:
-            replace_pattern = {}
-        yaml_content: str = yaml.dump(config.model_dump(), sort_keys=False)
-        yaml_content_with_comment: List[str] = []
-        previous_depth = 0
-        previous_key: str = None
-        current_path: List[str] = []
-        in_multiline_block: bool = False
-        for line in yaml_content.split("\n"):
-            line_no_indent = line.lstrip()
-            depth = int((len(line) - len(line_no_indent)) / 2)
-            if previous_depth < depth:
-                current_path.append(previous_key)
-            elif depth < previous_depth:
-                for i in range(depth, previous_depth):
-                    current_path.pop()
-            if line_no_indent.startswith("- "):
-                # we are in list element
-                print("pass list line:", line)
-                pass
-            elif ": " in line:
-                key, val = line.split(": ")
-                key = key.strip()
-                field = FieldInfoContainer.from_base_model_and_key(
-                    key, self.model, current_path
-                )
-                if field:
-                    comment = self.generate_field_header(
-                        field,
-                        indent_size=depth * 2,
-                    )
-                    if comment:
-                        yaml_content_with_comment.append(comment)
-                previous_key = key
-            elif line.endswith(":"):
-                key = line.split(":")[0].strip()
-                field = FieldInfoContainer.from_base_model_and_key(
-                    key, self.model, current_path
-                )
-                if field:
-                    comment = self.generate_field_header(
-                        field,
-                        indent_size=depth * 2,
-                    )
-                    if comment:
-                        yaml_content_with_comment.append(comment)
-                # sub chapter or line start
-                previous_key = key
-            previous_depth = depth
-            yaml_content_with_comment.append(line)
-
-        with open(self.config_file, "w") as file:
-            lines = []
-            if not replace_pattern:
-                lines = yaml_content_with_comment
-            else:
-                for line in yaml_content_with_comment:
-                    for key, val in replace_pattern.items():
-                        lines.append(f"{line.replace(key, val)}\n")
+                        lines.append(f"{line.replace(key, val)}")
             for l in lines:
                 file.write(l + "\n")
 
@@ -381,20 +295,3 @@ class YamlSettings:
             return val.model_dump_json()
         else:
             return str(val)
-
-
-def explode_field_annotation(self, annotation) -> List[Any]:
-    annotation_path = []
-    if get_origin(annotation) is Union:
-        # warning. no union supported
-        raise NotImplementedError(
-            "Union annotation is not supported. please remove it from your config model if you want to use pydantic-settings-yaml-plus"
-        )
-    elif annotation.__class__ == _GenericAlias:
-        annotation_path.append(annotation.__origin__)
-    else:
-        annotation_path.append(annotation)
-    for arg in get_args(annotation):
-        annotation_path.extend(self.explode_field_annotation(arg))
-
-    return annotation_path

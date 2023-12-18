@@ -2,14 +2,27 @@ from dataclasses import dataclass
 from pydantic import fields, BaseModel
 from pydantic_settings import BaseSettings
 import yaml
-from typing import List, Any, Dict, Type, Literal
+from typing import (
+    List,
+    Any,
+    Dict,
+    Type,
+    Literal,
+    get_origin,
+    get_args,
+    Optional,
+    get_type_hints,
+)
 from operator import itemgetter
+from psyplus.utils import is_typingOptional, get_typingOptionalArg
 
 # https://docs.pydantic.dev/2.5/api/json_schema/#pydantic.json_schema.GenerateJsonSchema
 JSON_BASIC_TYPES = Literal["boolean", "number", "string", "array", "object"]
 
 # https://datatracker.ietf.org/doc/html/draft-bhutton-json-schema-00#section-10.2.1
 JSON_SUBSCHEMAS = Literal["allOf", "anyOf", "oneOf", "not"]
+
+PYTHON_SCALAR_TYPES = [int, float, str, bool]
 
 
 @dataclass
@@ -56,9 +69,9 @@ class FieldInfoContainer:
         for member in self.container_model_hierachy:
             if isinstance(member.model_instance, (BaseModel, BaseSettings)):
                 result.append(member.key.upper())
-            elif member.model_instance == list:
+            elif type(member.model_instance) == list:
                 result.append("<LISTINDEX>")
-            elif member.model_instance == dict:
+            elif type(member.model_instance) == dict:
                 result.append("<DICTKEY>")
             else:
                 # unsupported type; we can not generate a env var
@@ -73,7 +86,6 @@ class FieldInfoContainer:
     @property
     def parent_container_model(self) -> BaseSettings | BaseModel:
         """The pydantic settings model that contains the field"""
-        print("self.container_model_hierachy", self.container_model_hierachy)
         for parent_obj in reversed(self.container_model_hierachy):
             if isinstance(parent_obj.model_instance, (BaseSettings, BaseModel)):
                 return parent_obj.model_instance
@@ -121,6 +133,42 @@ class FieldInfoContainer:
     @property
     def field_value_type_name(
         self,
+    ) -> str:
+        def stringifiy_annotation(annotation) -> str:
+            if type(annotation) == tuple:
+                res = []
+                for item in annotation:
+                    res.append(stringifiy_annotation(item))
+                if res:
+                    return ",".join(res)
+            if is_typingOptional(annotation):
+                return stringifiy_annotation(get_typingOptionalArg(annotation))
+            elif annotation == Any:
+                return None
+            elif annotation in PYTHON_SCALAR_TYPES:
+                return annotation.__name__
+            elif get_origin(annotation) == list or annotation == list:
+                list_annotation_args = get_args(annotation)
+                if list_annotation_args:
+                    return "List of " + stringifiy_annotation(list_annotation_args)
+                else:
+                    return "List"
+            elif get_origin(annotation) == dict or annotation == dict:
+                dict_annotation_args = get_args(annotation)
+                if dict_annotation_args:
+                    return "Dictonary of " + stringifiy_annotation(get_args(annotation))
+                else:
+                    return "Dictonary"
+            elif get_origin(annotation) == Literal:
+                return "Enum"
+            else:
+                return "Object"
+
+        return stringifiy_annotation(self.field_info.annotation)
+
+    @property
+    def field_value_json_type_name(
+        self,
     ) -> JSON_BASIC_TYPES | Dict[JSON_SUBSCHEMAS, JSON_BASIC_TYPES] | None:
         """The type the value has to be. based on https://docs.pydantic.dev/2.5/api/json_schema/#pydantic.json_schema.GenerateJsonSchema and https://datatracker.ietf.org/doc/html/draft-bhutton-json-schema-00#section-10.2.1
         e.g.
@@ -146,7 +194,7 @@ class FieldInfoContainer:
                 and len(self.json_model_schema["anyOf"]) == 2
                 and {"type": "null"} in self.json_model_schema["anyOf"]
             ):
-                # this is just a "<some type> or None"-case. we can simplfiy this, as the "or None" parts is covered by "is_requiried"
+                # this is just a "<some type> or None"-case. we can simplfiy this, as the "or None" Information is covered by "self.field_info.is_required()"
                 return next(
                     (
                         item["type"]

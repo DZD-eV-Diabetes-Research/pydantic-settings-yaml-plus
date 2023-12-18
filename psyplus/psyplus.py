@@ -62,7 +62,6 @@ class YamlSettings:
         dummy_values = self._get_fields_filler(
             required_only=True, use_example_values_if_exists=True
         )
-        print(dummy_values)
         config = self.model.model_validate(dummy_values)
         self._generate_file(
             config,
@@ -171,48 +170,6 @@ class YamlSettings:
             [env_var_prefix + k.upper() for k in path + [key]]
         )
         return info
-
-    def generate_field_header(
-        self, field: FieldInfoContainer, indent_size: int = 0
-    ) -> str:
-        if not isinstance(field.field_info, fields.FieldInfo):
-            return None
-
-        indent = f"{' '*indent_size}"
-
-        field_schema = field.field_info
-
-        header_lines: List[str] = []
-        path_str = ".".join(field.path)
-        header_lines.append(
-            f"### {path_str}{' - '+field_schema.title if field_schema.title else ''} ###"
-        )
-        if field.field_value_type_name:
-            header_lines.append(f"# Type: {field.field_value_type_name}")
-            # header_lines.append(f"# Python Annotation: {field.field_info.annotation}")
-        header_lines.append(f"# Required: {field.field_info.is_required()}")
-        if field.field_info.default != PydanticUndefined:
-            header_lines.append(
-                f"# Defaults to {field.field_info.default if not None else 'null/None'}"
-            )
-        if field.field_value_enum:
-            header_lines.append(f"# Allowed values: {field.field_value_enum}")
-        if field.field_info.metadata:
-            header_lines.append(f"# Constraints: {field.field_info.metadata}")
-
-        header_lines.append(f"# Env var name: '{field.env_var_name}'")
-        if field_schema.description:
-            desc = field_schema.description.replace("\n", f"\n{indent}#   ")
-            header_lines.append(f"# Description: {desc}")
-
-        if field_schema.examples:
-            exmpl = f"\n" + yaml.dump(
-                {field.field_name: self.jsonfy_example(field_schema.examples[0])}
-            )
-            exmpl = exmpl.rstrip("\n")
-            exmpl = exmpl.replace("\n", f"\n{indent}# >{indent}")
-            header_lines.append(f"# Example: {exmpl}")
-        return "\n" + "\n".join([f"{indent}{line}" for line in header_lines])
 
     def _get_fields_filler(
         self,

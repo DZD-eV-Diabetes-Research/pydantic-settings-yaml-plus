@@ -1,14 +1,10 @@
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
-from typing import (
-    List,
-    get_args,
-    Generator,
-)
+from typing import List, get_args, Generator, Dict
 from typing_extensions import Self
 import yaml
 
-from psyplus.utils import nested_pydantic_to_dict
+from psyplus.utils import nested_pydantic_to_dict, get_str_dict_as_table
 from psyplus.field_info_container import FieldInfoContainer, ModelPathMember
 
 from dataclasses import dataclass
@@ -24,7 +20,7 @@ class ListIndex:
     index: int
 
     def __str__(self):
-        return f"_{self.index}_"
+        return f"[{self.index}]"
 
 
 @dataclass
@@ -173,7 +169,9 @@ class YamlLine:
 
     @property
     def indent_depth(self):
-        # a more simple depth metric. it does not alway represent the correct hirachical depth of an item.
+        # depth by indent. can be a little bit inconsistent for listsitems, as they are allowed to be on the same depth as the parent key.
+        # see https://stackoverflow.com/questions/17014460/yaml-indentation-for-array-in-hash
+        # for a more consistent depth value, that is based on the hierachry and not the indent use `YamlLine.depth`
         return int(
             (len(self.line_raw) - len(self.line_no_indent))
             / len(self.parent_yaml_file.indent)
@@ -343,7 +341,6 @@ class YamlPydanticMetadataCommentInjector:
             if line.leading_comment:
                 output += "\n" + line.leading_comment + "\n"
             output += line.line_raw + "\n"
-            print("line.line_raw", line.line_raw)
             if line.multiline_value:
                 for mlv in line.multiline_value[1:]:
                     output += (
@@ -401,44 +398,65 @@ class YamlPydanticMetadataCommentInjector:
         key: str,
         field: FieldInfoContainer,
         comment_prefixer="#",
-    ):
-        comment = []
-        key_path = ".".join(str(p) for p in path)
+    ) -> str:
+        """Generates the key and texts for the header of a config variable.
+
+        Args:
+            yaml_line (YamlLine): An instance of YamlLine that contains the raw yaml line that will be commented and some metadata
+            path (List[ListIndex  |  str]): The yaml path of the commented field will
+            key (str): The yaml key of the commented field
+            field (FieldInfoContainer): All metadata of the pydantic-settings config field
+            comment_prefixer (str, optional): A prefix that is attached to every line. Defaults to "#".
+
+        Returns:
+            str:
+        """
+        comment: List[str] = []
+        data_header = {}
+        # Title
+
         header_line = f"## {key}"
-        if key != key_path:
-            header_line += f" - {key_path}"
+
         if field.field_info.title:
             header_line += f" - {field.field_info.title}"
         header_line += f" ###"
         comment.append(header_line)
+        # Data fields
+        key_path = ".".join(str(p) for p in path)
+        if key != key_path:
+            data_header[" YAML-path: "] = f"{key_path}"
 
+        if field.field_value_type_name:
+            data_header[" Type: "] = f"{field.field_value_type_name}"
+        data_header[" Required: "] = f"{field.field_info.is_required()}"
         if (
             hasattr(field.field_info, "default")
             and field.field_info.default != PydanticUndefined
         ):
-            comment.append(
-                f" Defaults to '{field.field_info.default if not None else 'null/None'}'"
-            )
+            data_header[
+                " Default: "
+            ] = f"{field.field_info.default if not None else 'null/None'}"
         if field.field_value_enum:
-            comment.append(f" Allowed values: {field.field_value_enum}")
-        """
+            data_header[" Allowed vals: "] = f"{field.field_value_enum}"
+
         if field.field_info.metadata:
-            comment += f"Constraints: {field.field_info.metadata}"
-        """
-        comment.append(f" Env var name: '{field.env_var_name}'")
+            data_header[" Constraints: "] = f"{field.field_info.metadata}"
+
+        data_header[" Env-var: "] = f"'{field.env_var_name}'"
         if field.field_info.description:
-            desc = field.field_info.description.split("\n")
-            desc[0] = f" Description: {desc[0]}"
-            desc = [desc[0]] + [" " * len(" Description:") + l for l in desc[1:]]
-            comment.extend(desc)
+            data_header[" Description: "] = f"{field.field_info.description}"
+
+        comment.extend(get_str_dict_as_table(data_header).rstrip().split("\n"))
+
         if field.field_info.examples:
             comment.extend(self._generate_examples_comment_text(key, field, yaml_line))
         comment = [comment_prefixer + l for l in comment]
+
         return comment
 
     def _generate_examples_comment_text(
         self, key: str, field: FieldInfoContainer, yaml_line: YamlLine
-    ):
+    ) -> List[str] | None:
         if not field.field_info.examples:
             return None
         text_lines = []
@@ -448,13 +466,14 @@ class YamlPydanticMetadataCommentInjector:
                 if len(field.field_info.examples) > 1
                 else " Example:"
             )
-            # todo: this is uncompleted
+
             example_as_yaml = yaml.dump(nested_pydantic_to_dict({key: example}))
             text_lines.extend(
                 self._indent_multilines(
                     text=example_as_yaml.split("\n"),
-                    indent_depth=yaml_line.indent_depth,
-                    line_prefix=">",
+                    indent_depth=0,
+                    line_prefix=" >",
+                    extra_indent_depth_after_prefix=yaml_line.indent_depth,
                     add_extra_indent_for_subsequent_lines_after_line_prefix=False,
                 )
             )
@@ -467,11 +486,13 @@ class YamlPydanticMetadataCommentInjector:
         indent_depth: int = 0,
         line_prefix: str = "",
         line_suffix: str = "",
+        extra_indent_depth_after_prefix: int = 0,
         add_extra_indent_for_subsequent_lines_after_line_prefix: bool = False,
     ) -> Generator[str, None, None]:
         indent = f"{indent_depth*self.source_yaml.indent}"
+        inner_indent = f"{extra_indent_depth_after_prefix*self.source_yaml.indent}"
         for index, line in enumerate(text):
-            line_prefix_real = line_prefix
+            line_prefix_real = f"{line_prefix}{inner_indent}"
             if index != 0 and add_extra_indent_for_subsequent_lines_after_line_prefix:
-                line_prefix_real = f"{line_prefix}{self.source_yaml.indent}"
+                line_prefix_real = f"{line_prefix_real}{self.source_yaml.indent}"
             yield f"{indent}{line_prefix_real}{line}{line_suffix}"

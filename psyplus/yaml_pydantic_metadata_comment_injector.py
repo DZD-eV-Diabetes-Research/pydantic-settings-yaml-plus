@@ -172,7 +172,9 @@ class YamlLine:
 
         iter_line = self
         while iter_line is not None:
-            #  you are here. path return bs for nested dicts
+            # ##############################################
+            #  you are here. path return bs for nested dicts (current testcase)
+            ################################################
             print("iter_line", iter_line)
             if iter_line.line_key:
                 line_key = iter_line.line_key

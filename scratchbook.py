@@ -181,4 +181,38 @@ def pydantic_to_dict_nested():
     print(yaml.dump(pydantic_to_dict(v), sort_keys=False))
 
 
-pydantic_to_dict_nested()
+# pydantic_to_dict_nested()
+
+
+def ruamel_yaml_test():
+    import sys
+    from ruamel.yaml import YAML
+    from ruamel.yaml.comments import CommentedMap
+
+    yaml = YAML()
+    raw_yaml = """
+external_subconfig_dict_with_eg:
+  a:
+
+    ### test ###
+    # YAML-path:  external_subconfig_dict_with_eg.a.test
+    # Required:   True
+    # Env-var:    'EXTERNAL_SUBCONFIG_DICT_WITH_EG__<DICTKEY>__TEST'
+    test: a value
+    """
+    data: CommentedMap = yaml.load(raw_yaml)
+    print(
+        type(data),
+        data["external_subconfig_dict_with_eg"]["a"].anchor,
+        data.yaml_set_anchor("testancor", always_dump=True),
+    )
+    # mh is see no way of inserting a comment UNDER a key without having a leading '#' in a actual yaml line
+    data.yaml_add_eol_comment(
+        "\n\n#This does not work", "external_subconfig_dict_with_eg", column=5
+    )
+
+    print(data)
+    yaml.dump(data, sys.stdout)
+
+
+ruamel_yaml_test()

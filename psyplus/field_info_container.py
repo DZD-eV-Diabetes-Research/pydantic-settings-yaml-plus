@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from pydantic import fields, BaseModel
 from pydantic_settings import BaseSettings
 import yaml
+import datetime
 from typing import (
     List,
     Any,
@@ -15,6 +16,15 @@ from typing import (
 )
 from operator import itemgetter
 from psyplus.utils import is_typingOptional, get_typingOptionalArg
+import datetime
+from pydantic import (
+    PastDate,
+    FutureDate,
+    PastDatetime,
+    FutureDatetime,
+    AwareDatetime,
+    NaiveDatetime,
+)
 
 # https://docs.pydantic.dev/2.5/api/json_schema/#pydantic.json_schema.GenerateJsonSchema
 JSON_BASIC_TYPES = Literal["boolean", "number", "string", "array", "object"]
@@ -22,7 +32,24 @@ JSON_BASIC_TYPES = Literal["boolean", "number", "string", "array", "object"]
 # https://datatracker.ietf.org/doc/html/draft-bhutton-json-schema-00#section-10.2.1
 JSON_SUBSCHEMAS = Literal["allOf", "anyOf", "oneOf", "not"]
 
-PYTHON_SCALAR_TYPES = [int, float, str, bool]
+PYTHON_SCALAR_TYPES = [
+    int,
+    float,
+    str,
+    bool,
+    datetime.time,
+    datetime.date,
+    datetime.datetime,
+    PastDate,
+    FutureDate,
+    PastDatetime,
+    FutureDatetime,
+    AwareDatetime,
+    NaiveDatetime,
+]
+
+ENV_VAR_LISTINDEX_PLACEHOLDER: str = "<LISTINDEX>"
+ENV_VAR_DICTKEY_PLACEHOLDER: str = "<DICTKEY>"
 
 
 @dataclass
@@ -40,16 +67,25 @@ class ModelPathMember:
     @property
     def model_class(
         self,
-    ) -> Type[BaseModel] | Type[BaseSettings] | Type[List] | Type[List]:
+    ) -> Type[BaseModel] | Type[BaseSettings] | Type[list] | Type[dict] | None:
+        return self.model_instance.__class__
         if isinstance(self.model_instance, (BaseModel, BaseSettings)):
             return self.model_instance.__class__
         return None
+
+    @property
+    def model_class_is_pydantic_settings(
+        self,
+    ) -> bool:
+        if isinstance(self.model_instance, (BaseModel, BaseSettings)):
+            return True
+        return False
 
     def __repr__(self):
         return self.__str__()
 
     def __str__(self):
-        return f"ModelPathMember(model={self.model_instance.__class__ if isinstance(self.model_instance, (BaseModel, BaseSettings)) else self.model_instance },key={self.key},field_info={self.field_info})"
+        return f"ModelPathMember(model_class={self.model_class},key={self.key},has_field_info={bool(self.field_info)})"
 
 
 @dataclass
@@ -70,9 +106,9 @@ class FieldInfoContainer:
             if isinstance(member.model_instance, (BaseModel, BaseSettings)):
                 result.append(member.key.upper())
             elif type(member.model_instance) == list:
-                result.append("<LISTINDEX>")
+                result.append(ENV_VAR_LISTINDEX_PLACEHOLDER)
             elif type(member.model_instance) == dict:
-                result.append("<DICTKEY>")
+                result.append(ENV_VAR_DICTKEY_PLACEHOLDER)
             else:
                 # unsupported type; we can not generate a env var
                 return None
@@ -156,7 +192,9 @@ class FieldInfoContainer:
             elif get_origin(annotation) == dict or annotation == dict:
                 dict_annotation_args = get_args(annotation)
                 if dict_annotation_args:
-                    return "Dictonary of " + stringifiy_annotation(get_args(annotation))
+                    return (
+                        f"Dictonary of ({stringifiy_annotation(get_args(annotation))})"
+                    )
                 else:
                     return "Dictonary"
             elif get_origin(annotation) == Literal:

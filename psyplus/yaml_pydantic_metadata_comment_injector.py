@@ -9,7 +9,7 @@ from psyplus.field_info_container import FieldInfoContainer, ModelPathMember
 
 from dataclasses import dataclass
 from pydantic_core import PydanticUndefined
-
+import json
 
 # https://yaml-multiline.info/
 YAML_BLOCK_SCALAR_INDICATOR = (">", "|", ">-", "|-", ">+", "|+")
@@ -45,7 +45,22 @@ class YamlLine:
         if self.depth == 0 and not self.is_list_item:
             return None
         if self.is_list_item:
-            return self.list_item_first_sibling_line.previous_line
+            parent_line = self.list_item_first_sibling_line.previous_line
+            if parent_line.is_list_item:
+                # we have a list items. the need to walk the list up and find the key element.
+                # maybe its even a nested list, so keep climping up if the first match is a list as well
+                while True:
+                    if (
+                        parent_line.is_list_item
+                        and parent_line.depth < self.list_item_first_sibling_line.depth
+                    ):
+                        return parent_line
+                    elif not parent_line.is_list_item:
+                        return parent_line
+                    parent_line = parent_line.previous_line
+            else:
+                return self.list_item_first_sibling_line.previous_line
+
         current_line = self
         while True:
             prev = current_line.previous_line
@@ -157,6 +172,8 @@ class YamlLine:
 
         iter_line = self
         while iter_line is not None:
+            #  you are here. path return bs for nested dicts
+            print("iter_line", iter_line)
             if iter_line.line_key:
                 line_key = iter_line.line_key
                 if iter_line.line_key.startswith("- "):
@@ -311,9 +328,16 @@ class YamlPydanticMetadataCommentInjector:
         self.output_yaml: str = self._generate_output_yaml()
 
     def _inject_field_headers(self) -> str:
+        import inspect
+
         for line in self.source_yaml.lines:
             field_root_model_path = self._get_model_hierarchy_by_yaml_path(line.path)
-
+            print("-----", line.line_raw)
+            print("yaml_path", line.path)
+            print(
+                "model_path",
+                field_root_model_path,
+            )
             if (
                 field_root_model_path
                 and field_root_model_path[-1].field_info is not None
@@ -356,6 +380,7 @@ class YamlPydanticMetadataCommentInjector:
         model_chapter = self.model
 
         for path_fragment in yaml_path:
+            print("-#-#", path_fragment, model_chapter)
             if isinstance(model_chapter, (BaseModel, BaseSettings)):
                 if path_fragment in model_chapter.model_fields:
                     model_path_member = ModelPathMember(
@@ -371,23 +396,27 @@ class YamlPydanticMetadataCommentInjector:
                     key=path_fragment,
                 )
                 container_model_hierachy.append(model_path_member)
+
                 model_chapter = model_chapter[path_fragment.index]
                 continue
-            else:
-                if (
-                    container_model_hierachy[-1].field_info is not None
-                    and container_model_hierachy[-1].field_info.annotation.__origin__
-                    == dict
-                ):
-                    dict_key_class = get_args(
-                        container_model_hierachy[-1].field_info.annotation
-                    )[0]
-                    model_path_member = ModelPathMember(
-                        model_instance=model_chapter,
-                        key=dict_key_class(path_fragment),
-                    )
-                    container_model_hierachy.append(model_path_member)
-                    model_chapter = model_chapter[dict_key_class(path_fragment)]
+            elif type(model_chapter) == dict:
+                print("model_chapter", model_chapter)
+                print("path_fragment", path_fragment)
+                try:
+                    content = model_chapter[path_fragment]
+                    key = path_fragment
+                except:
+                    # maybe it an int key
+                    content = model_chapter[int(path_fragment)]
+                    key = int(path_fragment)
+                # print("content", content)
+                model_path_member = ModelPathMember(
+                    model_instance=model_chapter,
+                    key=key,
+                )
+                container_model_hierachy.append(model_path_member)
+
+                model_chapter = model_chapter[key]
 
         return container_model_hierachy
 
@@ -433,9 +462,13 @@ class YamlPydanticMetadataCommentInjector:
             hasattr(field.field_info, "default")
             and field.field_info.default != PydanticUndefined
         ):
-            data_header[
-                " Default: "
-            ] = f"{field.field_info.default if not None else 'null/None'}"
+            if field.field_info.default is not None:
+                def_val = (
+                    f"'{json.dumps(nested_pydantic_to_dict(field.field_info.default))}'"
+                )
+            else:
+                def_val = "null/None"
+            data_header[" Default: "] = def_val
         if field.field_value_enum:
             data_header[" Allowed vals: "] = f"{field.field_value_enum}"
 

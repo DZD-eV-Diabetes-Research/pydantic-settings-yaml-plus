@@ -22,10 +22,6 @@ import yaml
 from dataclasses import dataclass
 from psyplus.field_info_container import FieldInfoContainer
 
-# ToDo: Wrap that class up and migrate that into a proper selfcontained python module
-# * Add generate markdown function
-# * complete _generate_file() with all parameters
-
 
 class YamlSettings:
     def __init__(self, model: Type[BaseSettings], file_path: Union[str, Path] = None):
@@ -116,7 +112,6 @@ class YamlSettings:
         yaml_content_with_comment = YamlPydanticMetadataCommentInjector(
             yaml=yaml_content, model=config
         ).output_yaml
-        # print("yaml_content_with_comment", yaml_content_with_comment)
 
         with open(self.config_file, "w") as file:
             lines = []

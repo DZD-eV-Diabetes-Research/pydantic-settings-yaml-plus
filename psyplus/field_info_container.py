@@ -16,6 +16,8 @@ from typing import (
 )
 from operator import itemgetter
 from psyplus.utils import is_typingOptional, get_typingOptionalArg
+
+# from psyplus.yaml_pydantic_metadata_comment_injector import ListIndex, DictKey
 import datetime
 from pydantic import (
     PastDate,
@@ -53,8 +55,41 @@ ENV_VAR_DICTKEY_PLACEHOLDER: str = "<DICTKEY>"
 
 
 @dataclass
+class ModelPathFragment:
+    model_instance: BaseModel | BaseSettings
+    key: str
+    annotation_fragment: Any = None
+
+    @property
+    def field_info(self) -> fields.FieldInfo | None:
+        if self.key_raw in self.model_instance.model_fields:
+            return self.model_instance.model_fields[self.key_raw]
+        return None
+
+    def get_next_annotation_fragment(self) -> Any:
+        if self.annotation_fragment is None:
+            if self.field_info:
+                return self.field_info.annotation
+        else:
+            if get_origin(self.annotation_fragment) == dict:
+                return get_args(self.annotation_fragment)[1]
+            else:
+                return get_args(self.annotation_fragment)[0]
+
+    @property
+    def key_raw(self):
+        if isinstance(self.key, str):
+            return self.key
+        try:
+            return self.key.index
+        except:
+            return self.key.key
+
+
+@dataclass
 class ModelPathMember:
     model_instance: BaseModel | BaseSettings | List[Any] | Dict[str, Any]
+    model_class: Type[BaseModel] | Type[BaseSettings] | Type[List] | Type[Dict] | None
     key: str
     # field: fields.FieldInfo
 
@@ -65,7 +100,7 @@ class ModelPathMember:
         return None
 
     @property
-    def model_class(
+    def ___REMOVE__ME__model_class(
         self,
     ) -> Type[BaseModel] | Type[BaseSettings] | Type[list] | Type[dict] | None:
         return self.model_instance.__class__
@@ -122,6 +157,7 @@ class FieldInfoContainer:
     @property
     def parent_container_model(self) -> BaseSettings | BaseModel:
         """The pydantic settings model that contains the field"""
+        print("self.container_model_hierachy", self.container_model_hierachy)
         for parent_obj in reversed(self.container_model_hierachy):
             if isinstance(parent_obj.model_instance, (BaseSettings, BaseModel)):
                 return parent_obj.model_instance
@@ -262,10 +298,12 @@ class FieldInfoContainer:
         Returns:
             List[Any]: List of allowed values for the field
         """
+        import json
 
-        if (
-            self.field_info is None
-            or "enum"
+        if self.field_info is None or (
+            self.field_name
+            in self.parent_container_model.model_json_schema()["properties"]
+            and "enum"
             not in self.parent_container_model.model_json_schema()["properties"][
                 self.field_name
             ]

@@ -1,11 +1,15 @@
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
-from typing import List, get_args, Generator, Dict
+from typing import List, get_args, Generator, Dict, get_origin
 from typing_extensions import Self
 import yaml
 
 from psyplus.utils import nested_pydantic_to_dict, get_str_dict_as_table
-from psyplus.field_info_container import FieldInfoContainer, ModelPathMember
+from psyplus.field_info_container import (
+    FieldInfoContainer,
+    ModelPathMember,
+    ModelPathFragment,
+)
 
 from dataclasses import dataclass
 from pydantic_core import PydanticUndefined
@@ -21,6 +25,14 @@ class ListIndex:
 
     def __str__(self):
         return f"[{self.index}]"
+
+
+@dataclass
+class DictKey:
+    key: int
+
+    def __str__(self):
+        return f"['{self.key}']"
 
 
 @dataclass
@@ -169,13 +181,16 @@ class YamlLine:
             _type_: _description_
         """
         path = []
+        print("-----------", self.line_raw)
+        print("-------next", self.previous_line)
 
         iter_line = self
         while iter_line is not None:
             # ##############################################
             #  you are here. path return bs for nested dicts (current testcase)
             ################################################
-            print("iter_line", iter_line)
+            print("###----")
+            print("iter_line", iter_line.line_raw)
             if iter_line.line_key:
                 line_key = iter_line.line_key
                 if iter_line.line_key.startswith("- "):
@@ -183,7 +198,10 @@ class YamlLine:
                 path.insert(0, line_key.strip())
             if iter_line.is_list_item:
                 path.insert(0, ListIndex(index=iter_line.list_index))
+            if iter_line.parent_key_line:
+                print("iter_line.parent_key_line", iter_line.parent_key_line.line_raw)
             iter_line = iter_line.parent_key_line
+        print(path)
         return path
 
     @property
@@ -334,12 +352,6 @@ class YamlPydanticMetadataCommentInjector:
 
         for line in self.source_yaml.lines:
             field_root_model_path = self._get_model_hierarchy_by_yaml_path(line.path)
-            print("-----", line.line_raw)
-            print("yaml_path", line.path)
-            print(
-                "model_path",
-                field_root_model_path,
-            )
             if (
                 field_root_model_path
                 and field_root_model_path[-1].field_info is not None
@@ -377,12 +389,65 @@ class YamlPydanticMetadataCommentInjector:
     def _get_model_hierarchy_by_yaml_path(
         self,
         yaml_path: List[str | ListIndex],
-    ) -> List[ModelPathMember]:
+    ) -> List[ModelPathFragment]:
+        container_model_hierachy: List[ModelPathFragment] = []
+        model_chapter = self.model
+        for path_fragment in yaml_path:
+            if len(container_model_hierachy) == 0:
+                container_model_hierachy.append(
+                    ModelPathFragment(
+                        model_instance=self.model,
+                        key=path_fragment,
+                    )
+                )
+            else:
+                previous_model = container_model_hierachy[-1]
+                next_annotation_fragment = previous_model.get_next_annotation_fragment()
+                if next_annotation_fragment is None and isinstance(
+                    previous_model.model_instance,
+                    (BaseModel, BaseSettings),
+                ):
+                    container_model_hierachy.append(
+                        ModelPathFragment(
+                            model_instance=getattr(
+                                previous_model.model_instance,
+                                previous_model.key,
+                            ),
+                            key=path_fragment,
+                        )
+                    )
+                elif get_origin(next_annotation_fragment) == dict:
+                    container_model_hierachy.append(
+                        ModelPathFragment(
+                            model_instance=previous_model.model_instance,
+                            key=DictKey(key=path_fragment),
+                            annotation_fragment=next_annotation_fragment,
+                        )
+                    )
+                elif get_origin(next_annotation_fragment) == list and isinstance(
+                    path_fragment, ListIndex
+                ):
+                    container_model_hierachy.append(
+                        ModelPathFragment(
+                            model_instance=previous_model.model_instance,
+                            key=path_fragment,
+                            annotation_fragment=next_annotation_fragment,
+                        )
+                    )
+                elif get_origin(next_annotation_fragment) == list and isinstance(
+                    path_fragment, ListIndex
+                ):
+                    # debug if branch
+                    print("previous_model", previous_model)
+                    print("next_annotation_fragment", next_annotation_fragment)
+                    print("path_fragment", path_fragment)
+                    raise ValueError("Something is wrong")
+        print("container_model_hierachy", container_model_hierachy)
+        return container_model_hierachy
+        print("-+-+-+-+-+", yaml_path)
         container_model_hierachy: List[ModelPathMember] = []
         model_chapter = self.model
-
         for path_fragment in yaml_path:
-            print("-#-#", path_fragment, model_chapter)
             if isinstance(model_chapter, (BaseModel, BaseSettings)):
                 if path_fragment in model_chapter.model_fields:
                     model_path_member = ModelPathMember(
@@ -402,12 +467,13 @@ class YamlPydanticMetadataCommentInjector:
                 model_chapter = model_chapter[path_fragment.index]
                 continue
             elif type(model_chapter) == dict:
-                print("model_chapter", model_chapter)
-                print("path_fragment", path_fragment)
+                container_model_hierachy.append(model_path_member)
                 try:
                     content = model_chapter[path_fragment]
                     key = path_fragment
+
                 except:
+                    raise
                     # maybe it an int key
                     content = model_chapter[int(path_fragment)]
                     key = int(path_fragment)
@@ -416,10 +482,9 @@ class YamlPydanticMetadataCommentInjector:
                     model_instance=model_chapter,
                     key=key,
                 )
-                container_model_hierachy.append(model_path_member)
 
                 model_chapter = model_chapter[key]
-
+        print("-+", container_model_hierachy)
         return container_model_hierachy
 
     def _generate_comment(

@@ -28,6 +28,11 @@ from pydantic import (
     NaiveDatetime,
 )
 
+from psyplus.model_path_2_yaml_path_mapper import (
+    map_pydantic_settings_to_yaml_path,
+    ModelPathMap,
+)
+
 # https://docs.pydantic.dev/2.5/api/json_schema/#pydantic.json_schema.GenerateJsonSchema
 JSON_BASIC_TYPES = Literal["boolean", "number", "string", "array", "object"]
 
@@ -55,94 +60,23 @@ ENV_VAR_DICTKEY_PLACEHOLDER: str = "<DICTKEY>"
 
 
 @dataclass
-class ModelPathFragment:
-    model_instance: BaseModel | BaseSettings
-    key: str
-    annotation_fragment: Any = None
-
-    @property
-    def field_info(self) -> fields.FieldInfo | None:
-        if self.key_raw in self.model_instance.model_fields:
-            return self.model_instance.model_fields[self.key_raw]
-        return None
-
-    def get_next_annotation_fragment(self) -> Any:
-        if self.annotation_fragment is None:
-            if self.field_info:
-                return self.field_info.annotation
-        else:
-            if get_origin(self.annotation_fragment) == dict:
-                return get_args(self.annotation_fragment)[1]
-            else:
-                return get_args(self.annotation_fragment)[0]
-
-    @property
-    def key_raw(self):
-        if isinstance(self.key, str):
-            return self.key
-        try:
-            return self.key.index
-        except:
-            return self.key.key
-
-
-@dataclass
-class ModelPathMember:
-    model_instance: BaseModel | BaseSettings | List[Any] | Dict[str, Any]
-    model_class: Type[BaseModel] | Type[BaseSettings] | Type[List] | Type[Dict] | None
-    key: str
-    # field: fields.FieldInfo
-
-    @property
-    def field_info(self) -> fields.FieldInfo | None:
-        if isinstance(self.model_instance, (BaseModel, BaseSettings)):
-            return self.model_instance.model_fields[self.key]
-        return None
-
-    @property
-    def ___REMOVE__ME__model_class(
-        self,
-    ) -> Type[BaseModel] | Type[BaseSettings] | Type[list] | Type[dict] | None:
-        return self.model_instance.__class__
-        if isinstance(self.model_instance, (BaseModel, BaseSettings)):
-            return self.model_instance.__class__
-        return None
-
-    @property
-    def model_class_is_pydantic_settings(
-        self,
-    ) -> bool:
-        if isinstance(self.model_instance, (BaseModel, BaseSettings)):
-            return True
-        return False
-
-    def __repr__(self):
-        return self.__str__()
-
-    def __str__(self):
-        return f"ModelPathMember(model_class={self.model_class},key={self.key},has_field_info={bool(self.field_info)})"
-
-
-@dataclass
 class FieldInfoContainer:
     """A wrapper class to simplify access to certain (meta-)informations in/of a `pydantic.fields.FieldInfo` instance.
     Intended for internal use only"""
 
     field_name: str
-    # field_info: fields.FieldInfo
-    container_model_hierachy: List[ModelPathMember]
-    # env_var_name: str
+    yaml_path_2_pydantic_settings_map: ModelPathMap
 
     def get_env_var_scheme(
         self, env_var_delimiter: str = "__", prefix: str = ""
     ) -> str:
         result = []
-        for member in self.container_model_hierachy:
-            if isinstance(member.model_instance, (BaseModel, BaseSettings)):
-                result.append(member.key.upper())
-            elif type(member.model_instance) == list:
+        for member in self.yaml_path_2_pydantic_settings_map.fragments:
+            if isinstance(member.parent_content, (BaseModel, BaseSettings)):
+                result.append(member.yaml_path_key.upper())
+            elif type(member.parent_content) == list:
                 result.append(ENV_VAR_LISTINDEX_PLACEHOLDER)
-            elif type(member.model_instance) == dict:
+            elif type(member.parent_content) == dict:
                 result.append(ENV_VAR_DICTKEY_PLACEHOLDER)
             else:
                 # unsupported type; we can not generate a env var
@@ -150,15 +84,15 @@ class FieldInfoContainer:
         return prefix + env_var_delimiter.join(result)
 
     @property
-    def field_info(self):
-        top_member = self.container_model_hierachy[-1]
-        return top_member.model_instance.model_fields[top_member.key]
+    def pydantic_field_info(self):
+        return self.yaml_path_2_pydantic_settings_map.enditem.field_info
 
     @property
     def parent_container_model(self) -> BaseSettings | BaseModel:
         """The pydantic settings model that contains the field"""
-        print("self.container_model_hierachy", self.container_model_hierachy)
-        for parent_obj in reversed(self.container_model_hierachy):
+        return self.yaml_path_2_pydantic_settings_map.enditem.parent_content
+        print("self.container_model_hierachy", self.yaml_path_2_pydantic_settings_map)
+        for parent_obj in reversed(self.yaml_path_2_pydantic_settings_map):
             if isinstance(parent_obj.model_instance, (BaseSettings, BaseModel)):
                 return parent_obj.model_instance
         # return list(self.container_model_hierachy[-1].keys())[0]
@@ -166,7 +100,7 @@ class FieldInfoContainer:
     @property
     def root_container_model(self) -> BaseSettings | BaseModel:
         """The root model that contains the container with the field. Can be the same as 'parent_container_model'"""
-        return self.container_model_hierachy[0].model_instance
+        return self.yaml_path_2_pydantic_settings_map.rootitem.source_pydantic_model
 
     @property
     def path(self) -> List[str]:
@@ -177,21 +111,20 @@ class FieldInfoContainer:
         """
         return [
             list(parent_field.values())[0]
-            for parent_field in self.container_model_hierachy
+            for parent_field in self.yaml_path_2_pydantic_settings_map
         ]
 
     @property
     def env_var_name(self) -> str:
-        env_var_delimiter: str = (
-            self.root_container_model.model_config["env_nested_delimiter"]
-            if self.root_container_model.model_config["env_nested_delimiter"]
-            else "__"
+        env_var_delimiter: str = self.root_container_model.model_config.get(
+            "env_nested_delimiter", "__"
         )
-        env_prefix: str = (
-            self.root_container_model.model_config["env_prefix"]
-            if self.root_container_model.model_config["env_prefix"]
-            else ""
-        )
+        if env_var_delimiter is None:
+            env_var_delimiter = "__"
+        print("env_var_delimiter", env_var_delimiter)
+        env_prefix: str = self.root_container_model.model_config.get("env_prefix", "__")
+        if env_prefix is None:
+            env_prefix = ""
         return self.get_env_var_scheme(
             env_var_delimiter=env_var_delimiter, prefix=env_prefix
         )
@@ -238,7 +171,7 @@ class FieldInfoContainer:
             else:
                 return "Object"
 
-        return stringifiy_annotation(self.field_info.annotation)
+        return stringifiy_annotation(self.pydantic_field_info.annotation)
 
     @property
     def field_value_json_type_name(
@@ -298,9 +231,8 @@ class FieldInfoContainer:
         Returns:
             List[Any]: List of allowed values for the field
         """
-        import json
-
-        if self.field_info is None or (
+        print("self.parent_container_model", self.parent_container_model)
+        if self.pydantic_field_info is None or (
             self.field_name
             in self.parent_container_model.model_json_schema()["properties"]
             and "enum"
@@ -328,7 +260,7 @@ class FieldInfoContainer:
         )
         model_walking_current = base_settings_model
         for parent_key in list(reversed((parents_key_path))) + [key]:
-            field_info_container.container_model_hierachy.append(
+            field_info_container.yaml_path_2_pydantic_settings_map.append(
                 {model_walking_current: parent_key}
             )
             if (
@@ -336,9 +268,9 @@ class FieldInfoContainer:
                 and key in model_walking_current.model_fields
             ):
                 # we are reached the direct parent container
-                field_info_container.field_info = model_walking_current.model_fields[
-                    key
-                ]
+                field_info_container.pydantic_field_info = (
+                    model_walking_current.model_fields[key]
+                )
             elif key != parent_key and key in parents_key_path:
                 # we are still in a grand-*-parent container
                 model_walking_current = model_walking_current.model_fields[

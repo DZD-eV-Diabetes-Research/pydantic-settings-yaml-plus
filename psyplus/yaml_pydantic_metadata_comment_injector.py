@@ -1,47 +1,41 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, fields
 from pydantic_settings import BaseSettings
 from typing import List, get_args, Generator, Dict, get_origin
 from typing_extensions import Self
 import yaml
 
-from psyplus.utils import nested_pydantic_to_dict, get_str_dict_as_table
-from psyplus.field_info_container import (
-    FieldInfoContainer,
-    ModelPathMember,
-    ModelPathFragment,
-)
-
 from dataclasses import dataclass
 from pydantic_core import PydanticUndefined
 import json
+
+
+from psyplus.utils import nested_pydantic_to_dict, get_str_dict_as_table
+from psyplus.field_info_container import FieldInfoContainer
+from psyplus.model_path_2_yaml_path_mapper import (
+    ListIndex,
+    map_pydantic_settings_to_yaml_path,
+    ModelPathFragment,
+    ModelPathMap,
+)
 
 # https://yaml-multiline.info/
 YAML_BLOCK_SCALAR_INDICATOR = (">", "|", ">-", "|-", ">+", "|+")
 
 
 @dataclass
-class ListIndex:
-    index: int
-
-    def __str__(self):
-        return f"[{self.index}]"
-
-
-@dataclass
-class DictKey:
-    key: int
-
-    def __str__(self):
-        return f"['{self.key}']"
-
-
-@dataclass
 class YamlLine:
     parent_yaml_file: "YamlFile"
+    line_number: int
     line_raw: str
     leading_comment: str = None
     # https://yaml-multiline.info/
     multiline_value: List[str] = None
+
+    def __repr__(self):
+        return f"{self.line_number}:{self.line_raw}"
+
+    def __str__(self):
+        return f"{self.line_number}:{self.line_raw}"
 
     @property
     def previous_line(self) -> Self | None:
@@ -181,27 +175,22 @@ class YamlLine:
             _type_: _description_
         """
         path = []
-        print("-----------", self.line_raw)
-        print("-------next", self.previous_line)
+        print("DEFPATHIN:", self)
 
         iter_line = self
         while iter_line is not None:
             # ##############################################
             #  you are here. path return bs for nested dicts (current testcase)
+            # solved? testing....
             ################################################
-            print("###----")
-            print("iter_line", iter_line.line_raw)
+
             if iter_line.line_key:
                 line_key = iter_line.line_key
-                if iter_line.line_key.startswith("- "):
-                    line_key = iter_line.line_key.replace("- ", " ", 1)
-                path.insert(0, line_key.strip())
+                path.insert(0, line_key)
             if iter_line.is_list_item:
                 path.insert(0, ListIndex(index=iter_line.list_index))
-            if iter_line.parent_key_line:
-                print("iter_line.parent_key_line", iter_line.parent_key_line.line_raw)
             iter_line = iter_line.parent_key_line
-        print(path)
+        print("DEFPATH RES:", path)
         return path
 
     @property
@@ -246,6 +235,14 @@ class YamlLine:
 
     @property
     def line_key(self) -> str | None:
+        if ":" in self.line_content:
+            return self.line_content.split(":", 1)[0].lstrip("- ")
+            key = key_value[0].strip()
+            print("key", key, key.isalpha())
+            if key.isalpha() or key.startswith("- "):
+                return key.lstrip("- ")
+        return None
+
         split_line = self.line_content.split(":", 1)
         if len(split_line) == 2:
             return split_line[0].replace("- ", "", 1).strip()
@@ -302,10 +299,11 @@ class YamlFile:
         comments_and_emptylines = ""
         multiline_value_parent_line: YamlLine = None
         multiline_value: List[str] = []
-        for line_raw in self.input_yaml.split("\n"):
+        for index, line_raw in enumerate(self.input_yaml.split("\n")):
             line = YamlLine(
                 parent_yaml_file=self,
                 line_raw=line_raw,
+                line_number=index + 1,
                 leading_comment=comments_and_emptylines
                 if comments_and_emptylines
                 else None,
@@ -341,25 +339,26 @@ class YamlFile:
 
 
 class YamlPydanticMetadataCommentInjector:
-    def __init__(self, yaml: str, model: BaseSettings | BaseModel):
+    def __init__(self, yaml: str, settings: BaseSettings | BaseModel):
         self.source_yaml: YamlFile = YamlFile(yaml)
-        self.model: BaseSettings = model
+        self.settings: BaseSettings = settings
         self._inject_field_headers()
         self.output_yaml: str = self._generate_output_yaml()
 
     def _inject_field_headers(self) -> str:
-        import inspect
-
         for line in self.source_yaml.lines:
-            field_root_model_path = self._get_model_hierarchy_by_yaml_path(line.path)
+            field_root_model_path = map_pydantic_settings_to_yaml_path(
+                self.settings, line.path
+            )
+
             if (
                 field_root_model_path
-                and field_root_model_path[-1].field_info is not None
+                and field_root_model_path.enditem.field_info is not None
             ):
                 field_info_wrapper = FieldInfoContainer(
                     field_name=line.line_key,
                     # field_info=field_root_model_path[-1],
-                    container_model_hierachy=field_root_model_path,
+                    yaml_path_2_pydantic_settings_map=field_root_model_path,
                 )
                 line.leading_comment = "\n".join(
                     self._indent_multilines(
@@ -386,106 +385,11 @@ class YamlPydanticMetadataCommentInjector:
                     )
         return output
 
-    def _get_model_hierarchy_by_yaml_path(
-        self,
-        yaml_path: List[str | ListIndex],
-    ) -> List[ModelPathFragment]:
-        container_model_hierachy: List[ModelPathFragment] = []
-        model_chapter = self.model
-        for path_fragment in yaml_path:
-            if len(container_model_hierachy) == 0:
-                container_model_hierachy.append(
-                    ModelPathFragment(
-                        model_instance=self.model,
-                        key=path_fragment,
-                    )
-                )
-            else:
-                previous_model = container_model_hierachy[-1]
-                next_annotation_fragment = previous_model.get_next_annotation_fragment()
-                if next_annotation_fragment is None and isinstance(
-                    previous_model.model_instance,
-                    (BaseModel, BaseSettings),
-                ):
-                    container_model_hierachy.append(
-                        ModelPathFragment(
-                            model_instance=getattr(
-                                previous_model.model_instance,
-                                previous_model.key,
-                            ),
-                            key=path_fragment,
-                        )
-                    )
-                elif get_origin(next_annotation_fragment) == dict:
-                    container_model_hierachy.append(
-                        ModelPathFragment(
-                            model_instance=previous_model.model_instance,
-                            key=DictKey(key=path_fragment),
-                            annotation_fragment=next_annotation_fragment,
-                        )
-                    )
-                elif get_origin(next_annotation_fragment) == list and isinstance(
-                    path_fragment, ListIndex
-                ):
-                    container_model_hierachy.append(
-                        ModelPathFragment(
-                            model_instance=previous_model.model_instance,
-                            key=path_fragment,
-                            annotation_fragment=next_annotation_fragment,
-                        )
-                    )
-                elif get_origin(next_annotation_fragment) == list and isinstance(
-                    path_fragment, ListIndex
-                ):
-                    # debug if branch
-                    print("previous_model", previous_model)
-                    print("next_annotation_fragment", next_annotation_fragment)
-                    print("path_fragment", path_fragment)
-                    raise ValueError("Something is wrong")
-        print("container_model_hierachy", container_model_hierachy)
-        return container_model_hierachy
-        print("-+-+-+-+-+", yaml_path)
-        container_model_hierachy: List[ModelPathMember] = []
-        model_chapter = self.model
-        for path_fragment in yaml_path:
-            if isinstance(model_chapter, (BaseModel, BaseSettings)):
-                if path_fragment in model_chapter.model_fields:
-                    model_path_member = ModelPathMember(
-                        model_instance=model_chapter,
-                        key=path_fragment,
-                    )
-                    model_chapter = getattr(model_chapter, path_fragment)
-                    container_model_hierachy.append(model_path_member)
-                    continue
-            elif isinstance(path_fragment, ListIndex):
-                model_path_member = ModelPathMember(
-                    model_instance=List,
-                    key=path_fragment,
-                )
-                container_model_hierachy.append(model_path_member)
-
-                model_chapter = model_chapter[path_fragment.index]
-                continue
-            elif type(model_chapter) == dict:
-                container_model_hierachy.append(model_path_member)
-                try:
-                    content = model_chapter[path_fragment]
-                    key = path_fragment
-
-                except:
-                    raise
-                    # maybe it an int key
-                    content = model_chapter[int(path_fragment)]
-                    key = int(path_fragment)
-                # print("content", content)
-                model_path_member = ModelPathMember(
-                    model_instance=model_chapter,
-                    key=key,
-                )
-
-                model_chapter = model_chapter[key]
-        print("-+", container_model_hierachy)
-        return container_model_hierachy
+    def _generate_comment2(self, yaml_2_settings_mapping: ModelPathMap):
+        pydantic_field_info: fields.FieldInfo | None = (
+            yaml_2_settings_mapping.enditem.field_info
+        )
+        pass
 
     def _generate_comment(
         self,
@@ -513,8 +417,8 @@ class YamlPydanticMetadataCommentInjector:
 
         header_line = f"## {key}"
 
-        if field.field_info.title:
-            header_line += f" - {field.field_info.title}"
+        if field.pydantic_field_info.title:
+            header_line += f" - {field.pydantic_field_info.title}"
         header_line += f" ###"
         comment.append(header_line)
         # Data fields
@@ -524,31 +428,29 @@ class YamlPydanticMetadataCommentInjector:
 
         if field.field_value_type_name:
             data_header[" Type: "] = f"{field.field_value_type_name}"
-        data_header[" Required: "] = f"{field.field_info.is_required()}"
+        data_header[" Required: "] = f"{field.pydantic_field_info.is_required()}"
         if (
-            hasattr(field.field_info, "default")
-            and field.field_info.default != PydanticUndefined
+            hasattr(field.pydantic_field_info, "default")
+            and field.pydantic_field_info.default != PydanticUndefined
         ):
-            if field.field_info.default is not None:
-                def_val = (
-                    f"'{json.dumps(nested_pydantic_to_dict(field.field_info.default))}'"
-                )
+            if field.pydantic_field_info.default is not None:
+                def_val = f"'{json.dumps(nested_pydantic_to_dict(field.pydantic_field_info.default))}'"
             else:
                 def_val = "null/None"
             data_header[" Default: "] = def_val
         if field.field_value_enum:
             data_header[" Allowed vals: "] = f"{field.field_value_enum}"
 
-        if field.field_info.metadata:
-            data_header[" Constraints: "] = f"{field.field_info.metadata}"
+        if field.pydantic_field_info.metadata:
+            data_header[" Constraints: "] = f"{field.pydantic_field_info.metadata}"
 
         data_header[" Env-var: "] = f"'{field.env_var_name}'"
-        if field.field_info.description:
-            data_header[" Description: "] = f"{field.field_info.description}"
+        if field.pydantic_field_info.description:
+            data_header[" Description: "] = f"{field.pydantic_field_info.description}"
 
         comment.extend(get_str_dict_as_table(data_header).rstrip().split("\n"))
 
-        if field.field_info.examples:
+        if field.pydantic_field_info.examples:
             comment.extend(self._generate_examples_comment_text(key, field, yaml_line))
         comment = [comment_prefixer + l for l in comment]
 
@@ -557,13 +459,13 @@ class YamlPydanticMetadataCommentInjector:
     def _generate_examples_comment_text(
         self, key: str, field: FieldInfoContainer, yaml_line: YamlLine
     ) -> List[str] | None:
-        if not field.field_info.examples:
+        if not field.pydantic_field_info.examples:
             return None
         text_lines = []
-        for index, example in enumerate(field.field_info.examples):
+        for index, example in enumerate(field.pydantic_field_info.examples):
             text_lines.append(
                 f" Example No. {index+1}:"
-                if len(field.field_info.examples) > 1
+                if len(field.pydantic_field_info.examples) > 1
                 else " Example:"
             )
 

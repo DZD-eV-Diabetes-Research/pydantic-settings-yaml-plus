@@ -110,7 +110,7 @@ class YamlSettings:
         YamlFile(yaml=yaml_content)
 
         yaml_content_with_comment = YamlPydanticMetadataCommentInjector(
-            yaml=yaml_content, model=config
+            yaml=yaml_content, settings=config
         ).output_yaml
 
         with open(self.config_file, "w") as file:
@@ -140,7 +140,7 @@ class YamlSettings:
         FieldInfoContainer.from_base_model_and_key(key, self.model, path)
         info = FieldInfoContainer(field_name=key)
         info.parent_container_model = self.model
-        info.field_info = self.model
+        info.pydantic_field_info = self.model
         env_var_delimiter: str = (
             self.model.model_config["env_nested_delimiter"]
             if self.model.model_config["env_nested_delimiter"]
@@ -148,19 +148,23 @@ class YamlSettings:
         )
         env_var_prefix: str = self.model.model_config["env_prefix"]
         for parent_key in path + [key]:
-            if isinstance(info.field_info, fields.FieldInfo):
+            if isinstance(info.pydantic_field_info, fields.FieldInfo):
                 if (
-                    inspect.isclass(info.field_info.type_)
-                    and issubclass(info.field_info.type_, BaseModel)
-                    and parent_key in info.field_info.type_.__fields__
+                    inspect.isclass(info.pydantic_field_info.type_)
+                    and issubclass(info.pydantic_field_info.type_, BaseModel)
+                    and parent_key in info.pydantic_field_info.type_.__fields__
                 ):
-                    info.parent_container_model = info.field_info.type_
-                    info.field_info = info.field_info.type_.__fields__[parent_key]
+                    info.parent_container_model = info.pydantic_field_info.type_
+                    info.pydantic_field_info = (
+                        info.pydantic_field_info.type_.__fields__[parent_key]
+                    )
                 else:
                     return None
             else:
-                info.parent_container_model = info.field_info
-                info.field_info = info.field_info.__fields__[parent_key]
+                info.parent_container_model = info.pydantic_field_info
+                info.pydantic_field_info = info.pydantic_field_info.__fields__[
+                    parent_key
+                ]
         info.env_var_name = env_var_delimiter.join(
             [env_var_prefix + k.upper() for k in path + [key]]
         )

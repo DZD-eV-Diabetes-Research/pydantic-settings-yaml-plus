@@ -172,7 +172,20 @@ def map_pydantic_settings_to_yaml_path(
                         annotation_fragment=parent_path_fragment.get_next_annotation_fragment(),
                     )
                 )
+            elif get_origin(
+                parent_path_fragment.annotation_fragment
+            ) == list and not isinstance(path_fragment, ListIndex):
+                print("yaml_path", yaml_path)
+                print("path_fragment", path_fragment)
+                print(
+                    "type(path_fragment)",
+                    type(path_fragment),
+                )
+                raise ValueError(
+                    "got a list item but no list index. something went wrong"
+                )
             elif get_origin(parent_path_fragment.annotation_fragment) == list:
+                print("yaml_path", yaml_path)
                 print("parent_path_fragment.content", parent_path_fragment.content)
                 print(
                     "parent_path_fragment.annotation_fragment",

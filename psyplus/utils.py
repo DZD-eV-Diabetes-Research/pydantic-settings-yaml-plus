@@ -1,4 +1,4 @@
-from typing import Any, Union, Dict
+from typing import Any, Union, Dict, List
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 
@@ -41,4 +41,18 @@ def get_str_dict_as_table(
                 result += f"{''.ljust(length_key_column)}{vertical_seperator}{v}\n"
         else:
             result += f"{key.ljust(length_key_column)}{vertical_seperator}{val}\n"
+    return result
+
+
+def split_at_start(s: str, sep: str = " ") -> List[str]:
+    """similar to str.split() but only split repeating seperatro from left and stops splitting when next fragment differs from separator
+    e.g. `split_at_start("- - - - my-value4 - ","- ")` will result in  ` ['', '', '', '', 'my-value4 - ']`
+    """
+    ssplit = s.split(sep)
+    result = []
+    for index, fragment in enumerate(ssplit):
+        if fragment != "":
+            result.append(sep.join(ssplit[index:]))
+            break
+        result.append(fragment)
     return result

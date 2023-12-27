@@ -201,11 +201,7 @@ external_subconfig_dict_with_eg:
     test: a value
     """
     data: CommentedMap = yaml.load(raw_yaml)
-    print(
-        type(data),
-        data["external_subconfig_dict_with_eg"]["a"].anchor,
-        data.yaml_set_anchor("testancor", always_dump=True),
-    )
+
     # mh is see no way of inserting a comment UNDER a key without having a leading '#' in a actual yaml line
 
     data.yaml_add_eol_comment(
@@ -217,3 +213,60 @@ external_subconfig_dict_with_eg:
 
 
 ruamel_yaml_test()
+
+
+def nested_lists():
+    import yaml
+
+    yaml_raw = """
+uneven_nesting:
+  - item1
+    - sub_item1
+      - sub_sub_item1
+  - item2
+    - sub_item2
+      - sub_sub_item2
+      - sub_sub_item3
+"""
+    d = yaml.safe_load(yaml_raw)
+    print(d)
+
+
+# nested_lists()
+
+
+def split_start_dash():
+    import re
+
+    test_vals = [
+        "- - my-value2 - ",
+        "  - - my-value2 - ",
+        "- - - - my-value4 - ",
+        "- my-value1 - ",
+        "  - my-value1 - ",
+    ]
+
+    def split_at_start(s: str, sep: str = " "):
+        ssplit = s.split(sep)
+        result = []
+        for index, fragment in enumerate(ssplit):
+            if fragment != "":
+                result.append(sep.join(ssplit[index:]))
+                break
+            result.append(fragment)
+        return result
+
+        parts = s.split("-")
+        result = [" " * (len(s) - len(s.lstrip())) + parts[0]]
+        if len(parts) > 1:
+            result.append("-" + "-".join(parts[1:]))
+        return result
+
+    for val in test_vals:
+        print("#-#-INPUT", val)
+        print("RESULT:", split_at_start(val.lstrip(), "- "))
+        print(split_at_start(val.lstrip(), "- ")[:-1])
+        print("")
+
+
+# split_start_dash()

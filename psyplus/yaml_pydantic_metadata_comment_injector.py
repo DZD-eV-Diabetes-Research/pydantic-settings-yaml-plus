@@ -9,7 +9,7 @@ from pydantic_core import PydanticUndefined
 import json
 
 
-from psyplus.utils import nested_pydantic_to_dict, get_str_dict_as_table
+from psyplus.utils import nested_pydantic_to_dict, get_str_dict_as_table, split_at_start
 from psyplus.field_info_container import FieldInfoContainer
 from psyplus.model_path_2_yaml_path_mapper import (
     ListIndex,
@@ -96,7 +96,54 @@ class YamlLine:
 
     @property
     def list_index(self) -> int:
+        print(
+            "self.walk_back_list_item_lines()",
+            list(self.walk_back_list_item_lines()),
+            "|",
+            self.line_raw,
+        )
         return len(list(self.walk_back_list_item_lines())) - 1
+
+    @property
+    def list_indexes(self) -> List[int]:
+        """Return the list position of a line. a line can be part of nested lists (a list in a list), there can be more than one index
+        e.g.
+        '- - myNestedListItem` will return [0,0]
+        ```
+          - otherParentLine
+          - - parentLine
+            - MyAcutalItem #<-- self
+        ```
+        will return [1,1]
+
+        Returns:
+            List[ListIndex]: _description_
+        """
+        indexes = []
+        list_items = list(self.walk_back_list_item_lines())
+        while True:
+            print("++++list_items", list_items)
+            if len(split_at_start(list_items[-1].line_content, "- ")[:-1]) > 1:
+                # nested list
+
+                next_list_items = list(list_items[-1].walk_back_list_item_lines())
+                if next_list_items != list_items:
+                    indexes.insert(0, len(list_items) - 1)
+                    list_items = next_list_items
+                else:
+                    indexes.insert(0, 0)
+                    break
+            else:
+                indexes.insert(0, len(list_items) - 1)
+                break
+
+        return indexes
+
+        list_seperators = split_at_start(self.line_content, "- ")[:-1]
+
+        return [len(list(self.walk_back_list_item_lines())) - 1] + (
+            (len(list_seperators) - 1) * [0]
+        )
 
     @property
     def list_item_leading_attr_line(self) -> Self | None:
@@ -130,22 +177,82 @@ class YamlLine:
             else:
                 previous_line = previous_line.previous_line
 
-    def walk_back_list_item_lines(self) -> Generator[Self, None, None]:
-        # iter list to the begining. starting from the from the 'self'-item
-        # if part of a list return the first item of this list
+    @property
+    def list_levels(self):
+        """If a line is start of a nested list. this will return the number of lists levels"""
+        return len(split_at_start(self.line_content, "- ") - 1)
+
+    def get_previous_list_item(self, level: int = 0):
+        if not self.is_list_item:
+            return None
+
+        if self.list_levels == 1:
+            possible_prev_list_item = self.previous_line.list_item_leading_attr_line
+            if possible_prev_list_item.depth > self.depth:
+                return None
+            elif possible_prev_list_item.list_levels > self.list_levels:
+                return possible_prev_list_item
+            
+
+    def walk_back_list_item_lines(self, level: int = 0) -> Generator[Self, None, None]:
+        """_summary_
+
+        Args:
+            level (int, optional): For nested list you can provide a level. 0 will walk the most outer list. Defaults to 0.
+
+        Returns:
+            _type_: _description_
+
+        Yields:
+            Generator[Self, None, None]: _description_
+        """
+
         if self.is_list_item:
-            source_leading_list_item_attr_line = self.list_item_leading_attr_line
+            next_list_item = self.list_item_leading_attr_line
+            if level + 1 > next_list_item.list_levels:
+                # sanity check
+                raise ValueError(
+                    f"Line '{self.line_content}' has only {self.list_levels} levels of nested lists but level {level} was requested."
+                )
+            while True:
+                possible_sibling = next_list_item.list_item_leading_attr_line
+                if possible_sibling.depth <
+
+        return None
+
+        # iter list to the begining. starting from the from the 'self'-item
+        if self.is_list_item:
+            if len(split_at_start(self.line_raw.lstrip(), "- ")) > 2:
+                # we start a  nested list item. we try to climb the outer list:
+                yield self
+                source_leading_list_item_attr_line = self.list_item_leading_attr_line
+                if source_leading_list_item_attr_line is None:
+                    return None
+            else:
+                source_leading_list_item_attr_line = self.list_item_leading_attr_line
 
             leading_list_item_attr_line = source_leading_list_item_attr_line
 
             while True:
-                if (
-                    leading_list_item_attr_line is None
-                    or leading_list_item_attr_line.indent_depth
-                    != source_leading_list_item_attr_line.indent_depth
-                ):
+                if leading_list_item_attr_line is None:
                     # we left the origin list or there is no more list item
                     return None
+                elif (
+                    leading_list_item_attr_line.indent_depth
+                    != source_leading_list_item_attr_line.indent_depth
+                ):
+                    if (
+                        len(
+                            split_at_start(
+                                leading_list_item_attr_line.line_raw.lstrip(), "- "
+                            )
+                        )
+                        > 2
+                    ):
+                        # we have a nested list. but our current item muste be the first list item of the current list
+                        yield leading_list_item_attr_line
+                    return None
+
                 if leading_list_item_attr_line is None:
                     return None
                 yield leading_list_item_attr_line
@@ -174,22 +281,25 @@ class YamlLine:
         Returns:
             _type_: _description_
         """
+
         path = []
         print("DEFPATHIN:", self)
 
-        iter_line = self
-        while iter_line is not None:
+        parent_line = self
+        while parent_line is not None:
             # ##############################################
-            #  you are here. path return bs for nested dicts (current testcase)
-            # solved? testing....
+            #  you are here. path return bs for nested lists (current testcase)
+            #
             ################################################
 
-            if iter_line.line_key:
-                line_key = iter_line.line_key
+            if parent_line.line_key:
+                line_key = parent_line.line_key
                 path.insert(0, line_key)
-            if iter_line.is_list_item:
-                path.insert(0, ListIndex(index=iter_line.list_index))
-            iter_line = iter_line.parent_key_line
+            if parent_line.is_list_item:
+                print("self.list_indexes", self.list_indexes)
+                path = [ListIndex(index=i) for i in self.list_indexes] + path
+                # path.insert(0, ListIndex(index=parent_line.list_index))
+            parent_line = parent_line.parent_key_line
         print("DEFPATH RES:", path)
         return path
 

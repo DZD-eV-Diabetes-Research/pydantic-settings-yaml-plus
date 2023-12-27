@@ -1,6 +1,6 @@
 from pydantic import BaseModel, fields
 from pydantic_settings import BaseSettings
-from typing import List, get_args, Generator, Dict, get_origin
+from typing import List, get_args, Generator, Dict, get_origin, Any
 from typing_extensions import Self
 import yaml
 
@@ -9,7 +9,12 @@ from pydantic_core import PydanticUndefined
 import json
 
 
-from psyplus.utils import nested_pydantic_to_dict, get_str_dict_as_table, split_at_start
+from psyplus.utils import (
+    nested_pydantic_to_dict,
+    get_str_dict_as_table,
+    split_at_start,
+    clean_annotation,
+)
 from psyplus.field_info_container import FieldInfoContainer
 from psyplus.model_path_2_yaml_path_mapper import (
     ListIndex,
@@ -17,6 +22,109 @@ from psyplus.model_path_2_yaml_path_mapper import (
     ModelPathFragment,
     ModelPathMap,
 )
+
+
+from ruamel.yaml import YAML, CommentedMap, CommentedSeq
+from io import StringIO
+
+
+class YamlFileGenerator:
+    def __init__(
+        self, settings_instance: BaseSettings | BaseModel, indent_size: int = 2
+    ):
+        self.indent_size = indent_size
+        self.yaml = YAML()
+        self.yaml.indent(sequence=indent_size, offset=indent_size)
+        self.settings = settings_instance
+
+    def parse_pydantic_model(self):
+        self.model: CommentedMap = self._parse_pydantic_model(self.settings)
+
+    def get_yaml(self) -> str:
+        stream = StringIO()
+        self.yaml.dump(self.model, stream)
+
+        return stream.getvalue()
+
+    def _parse_pydantic_model(
+        self, setting_inst: BaseSettings | BaseModel, level=0
+    ) -> CommentedMap:
+        result: CommentedMap = CommentedMap()
+        for key, field_info in setting_inst.model_fields.items():
+            field_value = getattr(setting_inst, key)
+            if isinstance(field_value, (BaseSettings, BaseModel)):
+                result[key] = self._parse_pydantic_model(field_value, level=level + 1)
+            elif isinstance(field_value, dict):
+                result[key] = self._parse_dict(
+                    field_value, field_info.annotation, level=level + 1
+                )
+            elif isinstance(field_value, list):
+                result[key] = self._parse_list(
+                    field_value, field_info.annotation, level=level + 1
+                )
+            else:
+                result[key] = field_value
+            result.yaml_set_comment_before_after_key(
+                key=key,
+                before="###CommentField###",
+                indent=level * self.indent_size,
+            )
+        print(
+            "setting_inst.__class__.__name__ level",
+            setting_inst.__class__.__name__,
+            level,
+            level * self.indent_size,
+        )
+        return result
+
+    def _parse_dict(self, value, field_annotation: Any, level: int = 0) -> CommentedMap:
+        result: CommentedMap = CommentedMap()
+        if isinstance(value, dict):
+            dict_key_annotation, dict_val_annotation = get_args(
+                clean_annotation(field_annotation)
+            )
+            for key, val in value.items():
+                if isinstance(val, (BaseSettings, BaseModel)):
+                    result[key] = self._parse_pydantic_model(val, level=level + 1)
+                elif isinstance(val, dict):
+                    result[key] = self._parse_dict(
+                        val, dict_val_annotation, level=level + 1
+                    )
+                elif isinstance(val, list):
+                    result[key] = self._parse_list(
+                        val, dict_val_annotation, level=level + 1
+                    )
+                else:
+                    result[key] = val
+                result.yaml_set_comment_before_after_key(
+                    key=key,
+                    before="###CommentDictItem###",
+                    indent=level * self.indent_size,
+                )
+        return result
+
+    def _parse_list(self, value, field_annotation: Any, level: int = 0) -> CommentedSeq:
+        result: CommentedSeq = CommentedSeq()
+        if isinstance(value, list):
+            list_val_annotation = get_args(clean_annotation(field_annotation))
+            for item in value:
+                if isinstance(item, (BaseSettings, BaseModel)):
+                    result.append(self._parse_pydantic_model(item, level=level + 1))
+                elif isinstance(item, dict):
+                    result.append(
+                        self._parse_dict(item, list_val_annotation, level=level + 1)
+                    )
+                elif isinstance(item, list):
+                    result.append(
+                        self._parse_list(item, list_val_annotation, level=level + 1)
+                    )
+                else:
+                    result.append(item)
+            # result.yaml_set_start_comment(
+            #    "###LIST COMMENT###", indent=level * self.indent_size
+            # )  # (key=key,before="###CommentListItem###",indent=level*self.yaml.indent.offset)
+        return result
+
 
 # https://yaml-multiline.info/
 YAML_BLOCK_SCALAR_INDICATOR = (">", "|", ">-", "|-", ">+", "|+")
@@ -192,7 +300,6 @@ class YamlLine:
                 return None
             elif possible_prev_list_item.list_levels > self.list_levels:
                 return possible_prev_list_item
-            
 
     def walk_back_list_item_lines(self, level: int = 0) -> Generator[Self, None, None]:
         """_summary_
@@ -206,19 +313,6 @@ class YamlLine:
         Yields:
             Generator[Self, None, None]: _description_
         """
-
-        if self.is_list_item:
-            next_list_item = self.list_item_leading_attr_line
-            if level + 1 > next_list_item.list_levels:
-                # sanity check
-                raise ValueError(
-                    f"Line '{self.line_content}' has only {self.list_levels} levels of nested lists but level {level} was requested."
-                )
-            while True:
-                possible_sibling = next_list_item.list_item_leading_attr_line
-                if possible_sibling.depth <
-
-        return None
 
         # iter list to the begining. starting from the from the 'self'-item
         if self.is_list_item:

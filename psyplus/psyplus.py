@@ -21,6 +21,7 @@ import yaml
 
 from dataclasses import dataclass
 from psyplus.field_info_container import FieldInfoContainer
+from psyplus.yaml_pydantic_metadata_comment_injector import YamlFileGenerator
 
 
 class YamlSettings:
@@ -59,6 +60,10 @@ class YamlSettings:
             required_only=True, use_example_values_if_exists=True
         )
         config = self.model.model_validate(dummy_values)
+        filegen = YamlFileGenerator(config)
+        filegen.parse_pydantic_model()
+        print(filegen.get_yaml())
+        exit()
         self._generate_file(
             config,
             generate_with_example_values=True,

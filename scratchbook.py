@@ -199,20 +199,34 @@ external_subconfig_dict_with_eg:
     # Required:   True
     # Env-var:    'EXTERNAL_SUBCONFIG_DICT_WITH_EG__<DICTKEY>__TEST'
     test: a value
+  l: 
+  - A
+  - B
     """
     data: CommentedMap = yaml.load(raw_yaml)
 
     # mh is see no way of inserting a comment UNDER a key without having a leading '#' in a actual yaml line
 
-    data.yaml_add_eol_comment(
-        "\n\n#This does not work", "external_subconfig_dict_with_eg", column=5
+    # data.yaml_add_eol_comment(
+    #    "\n\n#This does not work", "external_subconfig_dict_with_eg", column=5
+    # )
+    # data.yaml_set_start_comment(comment=indent=)
+    # data.yaml_end_comment_extend(comment=,clear=)
+    # data.yaml_add_eol_comment(comment=,key=,column=)
+    data["external_subconfig_dict_with_eg"].yaml_set_comment_before_after_key(
+        "a", before="KEY COMMETN BITCHES", indent=2
     )
+    # print(list(data.items()))
 
-    print(data)
+    # print(data)
+    data["external_subconfig_dict_with_eg"]["l"].yaml_set_start_comment("Cooment000", 0)
+    data["external_subconfig_dict_with_eg"]["l"][1].yaml_set_start_comment(
+        "Cooment111", 1
+    )
     yaml.dump(data, sys.stdout)
 
 
-ruamel_yaml_test()
+# ruamel_yaml_test()
 
 
 def nested_lists():
@@ -270,3 +284,85 @@ def split_start_dash():
 
 
 # split_start_dash()
+def test_clean_annot():
+    from pydantic import Field
+    from typing import (
+        Annotated,
+        Optional,
+        Dict,
+        Any,
+        Union,
+        get_type_hints,
+        get_args,
+        List,
+    )
+    from dataclasses import dataclass
+
+    def is_typingOptional(annotation: Any) -> bool:
+        return (
+            hasattr(annotation, "__origin__")
+            and annotation.__origin__ is Union
+            and annotation.__args__[1] is type(None)
+        )
+
+    def get_typingOptionalArg(annotation) -> Any:
+        if is_typingOptional(annotation):
+            return annotation.__args__[0]
+        return annotation
+
+    def clean_annotation(annotation) -> Any:
+        """remove any
+
+        Args:
+            annotation (_type_): _description_
+
+        Returns:
+            Any: _description_
+        """
+        if is_typingOptional(annotation=annotation):
+            annotation = get_typingOptionalArg(annotation=annotation)
+            return clean_annotation(annotation=annotation)
+        return annotation
+
+    @dataclass
+    class Test:
+        test: Annotated[
+            Optional[Dict[str, str]],
+            Field(description="Bla"),
+        ] = None
+        testlist: Annotated[Optional[List[str]], Field(description="Bla")] = None
+
+    print(get_args((get_type_hints(Test)["testlist"])))
+    print(get_args(clean_annotation(get_type_hints(Test)["testlist"])))
+
+
+# test_clean_annot()
+
+
+def ruamelyaml_debug():
+    from ruamel.yaml import YAML
+    from ruamel.yaml.comments import CommentedMap, CommentedSeq
+    from io import StringIO
+
+    yaml = YAML()
+    l0 = CommentedSeq()
+    d0 = CommentedMap()
+    l0_0 = CommentedSeq()
+    l0_1 = CommentedSeq()
+
+    l0_0.extend(["0|0", "0|1", "0|2"])
+    l0_0.yaml_set_start_comment("Comment")
+
+    d0["A"] = l0_0
+    l0_1.extend([d0])
+    l0.append(d0)
+    l0.append(l0_1)
+
+    stream = StringIO()
+
+    yaml.dump(l0, stream)
+
+    print(stream.getvalue())
+
+
+ruamelyaml_debug()

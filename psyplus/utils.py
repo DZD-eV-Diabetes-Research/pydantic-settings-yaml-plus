@@ -28,6 +28,21 @@ def get_typingOptionalArg(annotation) -> Any:
     return annotation
 
 
+def clean_annotation(annotation) -> Any:
+    """remove any
+
+    Args:
+        annotation (_type_): _description_
+
+    Returns:
+        Any: _description_
+    """
+    if is_typingOptional(annotation=annotation):
+        annotation = get_typingOptionalArg(annotation=annotation)
+        return clean_annotation(annotation=annotation)
+    return annotation
+
+
 def get_str_dict_as_table(
     d: Dict, vertical_seperator: str = "", respect_line_breaks_in_val: bool = True
 ) -> str:

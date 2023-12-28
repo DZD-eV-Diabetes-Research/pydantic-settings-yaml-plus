@@ -1,1 +1,1 @@
-from psyplus.psyplus import YamlSettings
+from psyplus.psyplus import YamlSettingsPlus

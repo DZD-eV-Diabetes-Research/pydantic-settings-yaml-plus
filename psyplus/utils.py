@@ -1,17 +1,75 @@
-from typing import Any, Union, Dict, List
+from typing import Any, Union, Dict, List, get_origin, Literal, get_args, Generator
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 
 
-def nested_pydantic_to_dict(obj: Any) -> Any:
-    if isinstance(obj, (BaseModel, BaseSettings)):
-        return nested_pydantic_to_dict(obj.model_dump())
-    elif isinstance(obj, dict):
-        return {k: nested_pydantic_to_dict(v) for k, v in obj.items()}
-    elif isinstance(obj, (list, tuple)):
-        return [nested_pydantic_to_dict(item) for item in obj]
-    else:
-        return obj
+import datetime
+from pydantic import (
+    PastDate,
+    FutureDate,
+    PastDatetime,
+    FutureDatetime,
+    AwareDatetime,
+    NaiveDatetime,
+)
+
+
+def python_annotation_to_generic_readable(
+    annotation,
+) -> str:
+    # https://docs.pydantic.dev/2.5/api/json_schema/#pydantic.json_schema.GenerateJsonSchema
+    JSON_BASIC_TYPES = Literal["boolean", "number", "string", "array", "object"]
+
+    # https://datatracker.ietf.org/doc/html/draft-bhutton-json-schema-00#section-10.2.1
+    JSON_SUBSCHEMAS = Literal["allOf", "anyOf", "oneOf", "not"]
+
+    PYTHON_SCALAR_TYPES = [
+        int,
+        float,
+        str,
+        bool,
+        datetime.time,
+        datetime.date,
+        datetime.datetime,
+        PastDate,
+        FutureDate,
+        PastDatetime,
+        FutureDatetime,
+        AwareDatetime,
+        NaiveDatetime,
+    ]
+
+    def stringifiy_annotation(annot) -> str:
+        if type(annot) == tuple:
+            res = []
+            for item in annot:
+                res.append(stringifiy_annotation(item))
+            if res:
+                return ",".join(res)
+        if is_typingOptional(annot):
+            return stringifiy_annotation(get_typingOptionalArg(annot))
+        elif annot == Any:
+            return None
+        elif annot in PYTHON_SCALAR_TYPES:
+            return annot.__name__
+        elif get_origin(annot) == list or annot == list:
+            list_annotation_args = get_args(annot)
+            if list_annotation_args:
+                return "List of " + stringifiy_annotation(list_annotation_args)
+            else:
+                return "List"
+        elif get_origin(annot) == dict or annot == dict:
+            dict_annotation_args = get_args(annot)
+            if dict_annotation_args:
+                return f"Dictonary of ({stringifiy_annotation(get_args(annot))})"
+            else:
+                return "Dictonary"
+        elif get_origin(annot) == Literal:
+            return "Enum"
+        else:
+            return "Object"
+
+    return stringifiy_annotation(annotation)
 
 
 def is_typingOptional(annotation: Any) -> bool:
@@ -29,7 +87,7 @@ def get_typingOptionalArg(annotation) -> Any:
 
 
 def clean_annotation(annotation) -> Any:
-    """remove any
+    """extract actual type annotation from field annotations like typing.Optional,...
 
     Args:
         annotation (_type_): _description_
@@ -43,6 +101,30 @@ def clean_annotation(annotation) -> Any:
     return annotation
 
 
+def has_literal(annotation: Any) -> bool:
+    clean_annot = clean_annotation(annotation=annotation)
+    if hasattr(clean_annot, "__origin__"):
+        return clean_annot.__origin__ == Literal
+
+
+def get_literal_list(annotation: Any) -> List[Any] | None:
+    clean_annot = clean_annotation(annotation=annotation)
+    if hasattr(clean_annot, "__origin__") and clean_annot.__origin__ == Literal:
+        return list(clean_annot.__args__)
+    return None
+
+
+def nested_pydantic_to_dict(obj: Any) -> Any:
+    if isinstance(obj, (BaseModel, BaseSettings)):
+        return nested_pydantic_to_dict(obj.model_dump())
+    elif isinstance(obj, dict):
+        return {k: nested_pydantic_to_dict(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [nested_pydantic_to_dict(item) for item in obj]
+    else:
+        return obj
+
+
 def get_str_dict_as_table(
     d: Dict, vertical_seperator: str = "", respect_line_breaks_in_val: bool = True
 ) -> str:
@@ -50,7 +132,7 @@ def get_str_dict_as_table(
     result = ""
     for key, val in d.items():
         if respect_line_breaks_in_val:
-            val = val.split("\n")
+            val = str(val).split("\n")
             result += f"{key.ljust(length_key_column)}{vertical_seperator}{val[0]}\n"
             for v in val[1:]:
                 result += f"{''.ljust(length_key_column)}{vertical_seperator}{v}\n"
@@ -59,15 +141,19 @@ def get_str_dict_as_table(
     return result
 
 
-def split_at_start(s: str, sep: str = " ") -> List[str]:
-    """similar to str.split() but only split repeating seperatro from left and stops splitting when next fragment differs from separator
-    e.g. `split_at_start("- - - - my-value4 - ","- ")` will result in  ` ['', '', '', '', 'my-value4 - ']`
-    """
-    ssplit = s.split(sep)
-    result = []
-    for index, fragment in enumerate(ssplit):
-        if fragment != "":
-            result.append(sep.join(ssplit[index:]))
-            break
-        result.append(fragment)
-    return result
+def indent_multilines(
+    text: List[str],
+    indent_depth: int = 0,
+    line_prefix: str = "",
+    line_suffix: str = "",
+    extra_indent_depth_after_prefix: int = 0,
+    add_extra_indent_for_subsequent_lines_after_line_prefix: bool = False,
+    indent: str = "  ",
+) -> Generator[str, None, None]:
+    indent = f"{indent_depth*indent}"
+    inner_indent = f"{extra_indent_depth_after_prefix*indent}"
+    for index, line in enumerate(text):
+        line_prefix_real = f"{line_prefix}{inner_indent}"
+        if index != 0 and add_extra_indent_for_subsequent_lines_after_line_prefix:
+            line_prefix_real = f"{line_prefix_real}{indent}"
+        yield f"{indent}{line_prefix_real}{line}{line_suffix}"

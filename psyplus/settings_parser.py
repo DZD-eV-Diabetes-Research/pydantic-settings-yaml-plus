@@ -7,33 +7,17 @@ from psyplus.utils import clean_annotation
 
 
 from ruamel.yaml import YAML, CommentedMap, CommentedSeq
-from io import StringIO
+
 
 from psyplus.field_container import FieldInfoContainer, ListIndex, DictKey
 
 
-class YamlFileGenerator:
-    def __init__(
-        self, settings_instance: BaseSettings | BaseModel, indent_size: int = 2
-    ):
-        self.indent_size = indent_size
-        self.yaml = YAML()
+class SettingsParser:
+    def __init__(self, settings: BaseSettings | BaseModel):
+        self.settings = settings
 
-        # https://yaml.readthedocs.io/en/latest/detail/#indentation-of-block-sequences
-        # > It is best to always have sequence >= offset + 2 but this is not enforced. Depending on your structure, not following this advice might lead to invalid output.
-        self.yaml.indent(sequence=indent_size + 2, offset=indent_size)
-        self.settings = settings_instance
-
-    def parse_pydantic_model(self):
-        self.model: CommentedMap = self._parse_pydantic_model(
-            self.settings, parent_path=[]
-        )
-
-    def get_yaml(self) -> str:
-        stream = StringIO()
-        self.yaml.dump(self.model, stream)
-
-        return stream.getvalue()
+    def parse_fields(self) -> List[FieldInfoContainer]:
+        return self._parse_pydantic_model(self.settings, parent_path=[])
 
     def _parse_pydantic_model(
         self,
@@ -41,7 +25,7 @@ class YamlFileGenerator:
         parent_path: List[ListIndex | DictKey | str],
     ) -> CommentedMap:
         level = len(parent_path)
-        result: CommentedMap = CommentedMap()
+        result: List
         for key, field_info in setting_inst.model_fields.items():
             path = parent_path.copy() + [key]
             field_value = getattr(setting_inst, key)

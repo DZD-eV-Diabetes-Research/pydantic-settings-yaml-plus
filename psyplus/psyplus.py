@@ -19,19 +19,17 @@ from pathlib import Path
 import yaml
 
 
-from dataclasses import dataclass
-from psyplus.field_info_container import FieldInfoContainer
 from psyplus.yaml_pydantic_metadata_comment_injector import YamlFileGenerator
 
 
-class YamlSettings:
+class YamlSettingsPlus:
     def __init__(self, model: Type[BaseSettings], file_path: Union[str, Path] = None):
         self.config_file: Path = (
             file_path if isinstance(file_path, Path) else Path(file_path)
         )
         self.model: Type[BaseSettings] = model
 
-    def get_config(self):
+    def get_config(self) -> BaseSettings:
         with open(self.config_file) as file:
             raw_yaml_object = file.read()
         obj: Dict = yaml.safe_load(raw_yaml_object)
@@ -59,7 +57,9 @@ class YamlSettings:
         dummy_values = self._get_fields_filler(
             required_only=True, use_example_values_if_exists=True
         )
+        print("dummy_values", dummy_values)
         config = self.model.model_validate(dummy_values)
+        return config
         filegen = YamlFileGenerator(config)
         filegen.parse_pydantic_model()
         print(filegen.get_yaml())
@@ -129,51 +129,6 @@ class YamlSettings:
                         lines.append(f"{line.replace(key, val)}")
             for l in lines:
                 file.write(l + "\n")
-
-    def _get_field_info_from_model_by_name(
-        self, key: str, path: List[str]
-    ) -> FieldInfoContainer | None:
-        """Get a `FieldInfoContainer` instance by a the field name and its path (parent container names)
-
-        Args:
-            key (str): _description_
-            path (List[str]): _description_
-
-        Returns:
-            FieldInfoContainer | None: _description_
-        """
-        FieldInfoContainer.from_base_model_and_key(key, self.model, path)
-        info = FieldInfoContainer(field_name=key)
-        info.parent_container_model = self.model
-        info.pydantic_field_info = self.model
-        env_var_delimiter: str = (
-            self.model.model_config["env_nested_delimiter"]
-            if self.model.model_config["env_nested_delimiter"]
-            else "__"
-        )
-        env_var_prefix: str = self.model.model_config["env_prefix"]
-        for parent_key in path + [key]:
-            if isinstance(info.pydantic_field_info, fields.FieldInfo):
-                if (
-                    inspect.isclass(info.pydantic_field_info.type_)
-                    and issubclass(info.pydantic_field_info.type_, BaseModel)
-                    and parent_key in info.pydantic_field_info.type_.__fields__
-                ):
-                    info.parent_container_model = info.pydantic_field_info.type_
-                    info.pydantic_field_info = (
-                        info.pydantic_field_info.type_.__fields__[parent_key]
-                    )
-                else:
-                    return None
-            else:
-                info.parent_container_model = info.pydantic_field_info
-                info.pydantic_field_info = info.pydantic_field_info.__fields__[
-                    parent_key
-                ]
-        info.env_var_name = env_var_delimiter.join(
-            [env_var_prefix + k.upper() for k in path + [key]]
-        )
-        return info
 
     def _get_fields_filler(
         self,

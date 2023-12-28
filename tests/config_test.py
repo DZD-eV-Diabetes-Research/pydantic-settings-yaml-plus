@@ -96,7 +96,7 @@ And you cant do n'thing about. i even attached an empty extra line. watyagonnado
     external_subconfig_dict: Dict[str, ExternalSubClass]
     external_subconfig_dict2: dict
     external_subconfig_dict_with_eg: Annotated[
-        Dict[str, ExternalSubClass],
+        Optional[Dict[str, ExternalSubClass]],
         Field(
             title="A dict field with example",
             examples=[
@@ -109,4 +109,4 @@ And you cant do n'thing about. i even attached an empty extra line. watyagonnado
                 },
             ],
         ),
-    ]
+    ] = None

@@ -284,6 +284,8 @@ def split_start_dash():
 
 
 # split_start_dash()
+
+
 def test_clean_annot():
     from pydantic import Field
     from typing import (
@@ -345,24 +347,114 @@ def ruamelyaml_debug():
     from io import StringIO
 
     yaml = YAML()
+    yaml.indent(sequence=2, offset=2)
+    m0 = CommentedMap()
     l0 = CommentedSeq()
-    d0 = CommentedMap()
+    m1 = CommentedMap()
+    l1 = CommentedSeq()
+    m0["OuterMap"] = l0
+    l0.append(m1)
+    m1["innerMapSimpleVal"] = "Somevalue"
+    m1.yaml_set_comment_before_after_key(
+        key="innerMapSimpleVal", before="###MyComment###", indent=2
+    )
+    m1["innerMapListVal"] = l1
+    m1.yaml_set_comment_before_after_key(
+        key="innerMapListVal", before="###MyComment2###", indent=2
+    )
+    l1.extend(["A", "B"])
+    """
     l0_0 = CommentedSeq()
     l0_1 = CommentedSeq()
 
-    l0_0.extend(["0|0", "0|1", "0|2"])
+    l0_0.extend(["0|0"])
     l0_0.yaml_set_start_comment("Comment")
 
-    d0["A"] = l0_0
-    l0_1.extend([d0])
-    l0.append(d0)
+    m1["A"] = l0_0
+    l0_1.extend([m1])
+    l0.append(m1)
     l0.append(l0_1)
-
+    m0["OuterMap"] = l0_1
+    """
     stream = StringIO()
 
-    yaml.dump(l0, stream)
+    yaml.dump(m0, stream)
 
     print(stream.getvalue())
 
 
-ruamelyaml_debug()
+# ruamelyaml_debug()
+
+
+def get_literal_annot():
+    from pydantic import Field
+    from typing import (
+        Annotated,
+        Optional,
+        Dict,
+        Any,
+        Union,
+        get_type_hints,
+        get_args,
+        List,
+        Literal,
+    )
+    from dataclasses import dataclass
+
+    def is_typingOptional(annotation: Any) -> bool:
+        return (
+            hasattr(annotation, "__origin__")
+            and annotation.__origin__ is Union
+            and annotation.__args__[1] is type(None)
+        )
+
+    def get_typingOptionalArg(annotation) -> Any:
+        if is_typingOptional(annotation):
+            return annotation.__args__[0]
+        return annotation
+
+    def clean_annotation(annotation) -> Any:
+        """remove any
+
+        Args:
+            annotation (_type_): _description_
+
+        Returns:
+            Any: _description_
+        """
+        if is_typingOptional(annotation=annotation):
+            annotation = get_typingOptionalArg(annotation=annotation)
+            return clean_annotation(annotation=annotation)
+        return annotation
+
+    def has_literal(annotation: Any) -> bool:
+        clean_annot = clean_annotation(annotation=annotation)
+        if hasattr(clean_annot, "__origin__"):
+            return clean_annot.__origin__ == Literal
+
+    def get_literal_list(annotation: Any) -> List[Any] | None:
+        clean_annot = clean_annotation(annotation=annotation)
+        if hasattr(clean_annot, "__origin__") and clean_annot.__origin__ == Literal:
+            return list(clean_annot.__args__)
+        return None
+
+    @dataclass
+    class Test:
+        test: Annotated[
+            Optional[Literal["A", "B", "C"]],
+            Field(description="Bla"),
+        ] = None
+        testlist: Annotated[
+            Optional[Literal["1A", "2B", "3C"]], Field(description="Bla")
+        ] = None
+
+    print(get_literal_list((get_type_hints(Test)["test"])))
+    print(get_literal_list((get_type_hints(Test)["testlist"])))
+    # print(get_args(clean_annotation(get_type_hints(Test)["testlist"])))
+    # has_literal(get_type_hints(Test)["testlist"])
+    return
+    print(get_args((get_type_hints(Test)["testlist"])))
+    print(get_args(clean_annotation(get_type_hints(Test)["testlist"])))
+
+
+get_literal_annot()

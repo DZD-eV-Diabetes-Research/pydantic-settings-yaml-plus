@@ -5,7 +5,7 @@ import inspect
 from pathlib import Path, PurePath
 
 
-class TestConfigCom(BaseSettings):
+class TestConfig(BaseSettings):
     log_level: Literal["INFO", "DEBUG"] = "INFO"
     storage_dir: str = Field(
         description="A directory to story any states fpr the bot. Only for saving encryption keys/state at the moment.",

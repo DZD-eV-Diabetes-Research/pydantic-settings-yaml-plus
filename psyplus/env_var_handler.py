@@ -1,21 +1,25 @@
-from typing import Tuple, List, Dict, Any
+from typing import Tuple, List, Dict, Any, get_args, get_origin
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 import os
-
+from inspect import isclass
 from psyplus.field_container import FieldInfoContainer
-from psyplus.utils import clean_annotation
+from psyplus.utils import clean_annotation, get_dict_val_key_insensitive
+
+
+class ListitemPlaceholder:
+    pass
 
 
 class EnvVarHandler:
     def __init__(self, settings: BaseSettings | BaseModel):
         self.settings: BaseSettings | BaseModel = settings
-
         self.env_var_delimiter, self.env_var_prefix = self._get_env_var_seps()
         self.env_vars: Dict[str, str] = self._get_env_vars()
 
     def _get_env_vars(self) -> Dict[str, str]:
-        self.env_vars = {
+        print("os.environ.items()", os.environ.items())
+        return {
             k: v for k, v in os.environ.items() if k.startswith(self.env_var_prefix)
         }
 
@@ -33,45 +37,90 @@ class EnvVarHandler:
         return env_var_delimiter, env_prefix
 
     def get_value_dict_by_env_var_key(self, env_var_key: str):
-        self._get_value_dict_by_env_var_key(
-            env_var_key=self._split_env_var(env_var_key), settings=self.settings
+        env_var_splitted = self._split_env_var(env_var_key)
+        result = self._get_value_dict_by_env_var_key(
+            env_var_key_splitted=env_var_splitted,
+            settings=self.settings,
+            value=self.env_vars[env_var_key],
         )
 
     def _get_value_dict_by_env_var_key(
         self,
-        env_var_key: List[str],
-        settings: BaseSettings | BaseModel = None,
+        env_var_key_splitted: List[str],
+        settings: BaseSettings | BaseModel | Dict | List = None,
         annotation: Any = None,
+        value: Any = None,
     ) -> Dict:
-        result = {}
+        if len(env_var_key_splitted) == 0:
+            return value
+
+        print("--------")
+        print("annotation", annotation)
+        print("env_var_key", env_var_key_splitted)
+        print("settings.__class__", settings.__class__)
+
+        env_var_fragment = env_var_key_splitted[0]
+        print("path_fragment", env_var_fragment)
+
+        print("+++++")
+
         annotation = clean_annotation(annotation)
         next_annotation = None
-        print("env_var_key", env_var_key)
 
-        for index, path_fragment in enumerate(env_var_key[0]):
-            next_settings_instance = settings
-
-            if path_fragment in settings.model_fields:
-                next_annotation = settings.model_fields[path_fragment].annotation
-            elif annotation is not None and hasattr(annotation, "__origin__"):
-                if annotation.__origin__ == dict:
-                    next_annotation = annotation.__args__[1]
-                elif annotation.__origin__ == list:
-                    next_annotation = annotation.__args__[0]
-                    path_fragment = int(path_fragment)
-                    result = []
-            if (
-                next_annotation is not None
-                and hasattr(next_annotation, "__origin__")
-                and next_annotation.__origin__ in [BaseSettings, BaseModel]
-            ):
-                next_settings_instance = getattr(settings, path_fragment)
-            result[path_fragment] = self._get_value_dict_by_env_var_key(
-                env_var_key=env_var_key[index + 1 :],
+        if annotation is None or (
+            isclass(annotation) and issubclass(annotation, (BaseSettings, BaseModel))
+        ):
+            if annotation is None:
+                annotation = settings
+            key = next(
+                k
+                for k in annotation.model_fields.keys()
+                if k.upper() == env_var_fragment.upper()
+            )
+            next_annotation = annotation.model_fields[key].annotation
+            next_settings_instance = getattr(settings, key, None)
+            result = {}
+            result[key] = self._get_value_dict_by_env_var_key(
+                env_var_key_splitted=env_var_key_splitted[1:],
                 settings=next_settings_instance,
                 annotation=next_annotation,
+                value=value,
             )
-        print("result", result)
+        elif get_origin(annotation) == dict:
+            next_annotation = get_args(annotation)[1]
+
+            next_settings_instance = get_dict_val_key_insensitive(
+                settings, env_var_fragment, None
+            )
+            result = {}
+            result[env_var_fragment.lower()] = self._get_value_dict_by_env_var_key(
+                env_var_key_splitted=env_var_key_splitted[1:],
+                settings=next_settings_instance,
+                annotation=next_annotation,
+                value=value,
+            )
+        elif get_origin(annotation) == list:
+            print("JEP LIST")
+            next_annotation = get_args(annotation)[0]
+            # fill up list with placeholder to respect the env vars given index
+            result = [ListitemPlaceholder] * int(env_var_fragment)
+            try:
+                print("settings", settings)
+                next_settings_instance = (
+                    settings[int(env_var_fragment)] if settings is not None else None
+                )
+            except IndexError:
+                next_settings_instance = None
+
+            result.append(
+                self._get_value_dict_by_env_var_key(
+                    env_var_key_splitted=env_var_key_splitted[1:],
+                    settings=next_settings_instance,
+                    annotation=next_annotation,
+                    value=value,
+                )
+            )
+        print("RESULT", result)
         return result
 
     def _get_setting_dict_by_env_var(self, env_var_key: str) -> Dict:

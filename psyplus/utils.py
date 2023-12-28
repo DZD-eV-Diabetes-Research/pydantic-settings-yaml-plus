@@ -1,4 +1,14 @@
-from typing import Any, Union, Dict, List, get_origin, Literal, get_args, Generator
+from typing import (
+    Any,
+    Union,
+    Dict,
+    List,
+    get_origin,
+    Literal,
+    get_args,
+    Generator,
+)
+from pydantic_core import PydanticUndefined
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 
@@ -123,6 +133,17 @@ def nested_pydantic_to_dict(obj: Any) -> Any:
         return [nested_pydantic_to_dict(item) for item in obj]
     else:
         return obj
+
+
+def get_dict_val_key_insensitive(
+    dictionary: Dict, key: str, default: Any = PydanticUndefined
+):
+    for k in dictionary.keys():
+        if k.upper() == key.upper():
+            return dictionary[k]
+    if default != PydanticUndefined:
+        raise KeyError(f"Can not find key '{key}' in {dictionary.keys()}")
+    return default
 
 
 def get_str_dict_as_table(

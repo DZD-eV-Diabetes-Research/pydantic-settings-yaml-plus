@@ -1,10 +1,18 @@
 from typing import Tuple, List, Dict, Any, get_args, get_origin
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
+from pydantic_core import PydanticUndefined
 import os
 from inspect import isclass
 from psyplus.field_container import FieldInfoContainer
-from psyplus.utils import clean_annotation, get_dict_val_key_insensitive
+from psyplus.utils import (
+    clean_annotation,
+    get_dict_val_key_insensitive,
+    env_to_nested_dict,
+)
+import logging
+
+log = logging.getLogger(__name__)
 
 
 class ListitemPlaceholder:
@@ -14,14 +22,46 @@ class ListitemPlaceholder:
 class EnvVarHandler:
     def __init__(self, settings: BaseSettings | BaseModel):
         self.settings: BaseSettings | BaseModel = settings
+        self.settings_as_dict: BaseSettings | BaseModel = settings.model_dump()
         self.env_var_delimiter, self.env_var_prefix = self._get_env_var_seps()
         self.env_vars: Dict[str, str] = self._get_env_vars()
+        for key in self.env_vars.keys():
+            val_dic = self.get_value_dict_by_env_var_key(key)
+            if val_dic:
+                self._deep_merge(self.settings_as_dict, val_dic)
+        self.settings = settings.__class__.model_validate(self.settings_as_dict)
+
+    def get_value_dict_by_env_var_key(
+        self, env_var_key: str, default: Any = PydanticUndefined
+    ) -> Dict | None:
+        try:
+            val = self.env_vars[env_var_key]
+        except KeyError:
+            prefix_hint = ""
+            if self.env_var_prefix and env_var_key.startswith(self.env_var_prefix):
+                prefix_hint = f" Did you exclude the prefix? If no, try it whithout the prefix `{self.env_var_prefix}`."
+            raise ValueError(
+                f"No environment var with key `{env_var_key}` found.{prefix_hint}"
+            )
+        env_var_splitted = self._split_env_var(env_var_key)
+        try:
+            result = self._get_value_dict_by_env_var_key(
+                env_var_key_splitted=env_var_splitted,
+                settings=self.settings,
+                value=val,
+            )
+        except KeyError:
+            return None
+        return result
 
     def _get_env_vars(self) -> Dict[str, str]:
-        print("os.environ.items()", os.environ.items())
-        return {
-            k: v for k, v in os.environ.items() if k.startswith(self.env_var_prefix)
-        }
+        """Collect env vars. if applicable filter by prefix and remove prefix for internal use."""
+        result = {}
+        for key, val in os.environ.items():
+            if key.startswith(self.env_var_prefix):
+                non_prefixed_key = key.replace(self.env_var_prefix, "", 1)
+                result[non_prefixed_key] = val
+        return result
 
     def _get_env_var_seps(self) -> Tuple[str, str]:
         env_var_delimiter: str = (
@@ -36,14 +76,6 @@ class EnvVarHandler:
         )
         return env_var_delimiter, env_prefix
 
-    def get_value_dict_by_env_var_key(self, env_var_key: str):
-        env_var_splitted = self._split_env_var(env_var_key)
-        result = self._get_value_dict_by_env_var_key(
-            env_var_key_splitted=env_var_splitted,
-            settings=self.settings,
-            value=self.env_vars[env_var_key],
-        )
-
     def _get_value_dict_by_env_var_key(
         self,
         env_var_key_splitted: List[str],
@@ -54,29 +86,27 @@ class EnvVarHandler:
         if len(env_var_key_splitted) == 0:
             return value
 
-        print("--------")
-        print("annotation", annotation)
-        print("env_var_key", env_var_key_splitted)
-        print("settings.__class__", settings.__class__)
-
         env_var_fragment = env_var_key_splitted[0]
-        print("path_fragment", env_var_fragment)
-
-        print("+++++")
 
         annotation = clean_annotation(annotation)
         next_annotation = None
-
         if annotation is None or (
             isclass(annotation) and issubclass(annotation, (BaseSettings, BaseModel))
         ):
             if annotation is None:
                 annotation = settings
-            key = next(
-                k
-                for k in annotation.model_fields.keys()
-                if k.upper() == env_var_fragment.upper()
-            )
+            try:
+                key = next(
+                    k
+                    for k in annotation.model_fields.keys()
+                    if k.upper() == env_var_fragment.upper()
+                )
+            except StopIteration:
+                # we found no setting key that matches the env var key.
+                # this env var propably has nothing to do with the settings here
+                raise KeyError(
+                    f"Attr/Key `{env_var_fragment}` not found in `{annotation.__class__}`"
+                )
             next_annotation = annotation.model_fields[key].annotation
             next_settings_instance = getattr(settings, key, None)
             result = {}
@@ -99,13 +129,21 @@ class EnvVarHandler:
                 annotation=next_annotation,
                 value=value,
             )
+        elif annotation == dict:
+            # omg, we are in the wildlands. any dict is allowed.
+            # we just make our best guess by creating a nested dict based on the path fragments
+            # TODO: an option, to restrict this would be nice.
+            log.warning(
+                f"Env var key `{env_var_fragment}` is mapped to a simple `dict` annotation. This is not recommended. "
+                + "Please use a `Dict[<type>]` annotation."
+                + "We are just creating a nested dict based on the path fragments, which maybe is not what you expected."
+            )
+            result = env_to_nested_dict(env_var_key_splitted, value)
         elif get_origin(annotation) == list:
-            print("JEP LIST")
             next_annotation = get_args(annotation)[0]
             # fill up list with placeholder to respect the env vars given index
             result = [ListitemPlaceholder] * int(env_var_fragment)
             try:
-                print("settings", settings)
                 next_settings_instance = (
                     settings[int(env_var_fragment)] if settings is not None else None
                 )
@@ -120,21 +158,64 @@ class EnvVarHandler:
                     value=value,
                 )
             )
-        print("RESULT", result)
+        elif annotation == list:
+            # omg, any list is allowed.
+            # this is stupid. lets output a warning and just make a simple list the value
+            log.warning(
+                f"Env var key `{env_var_fragment}` is mapped to a simple `list` annotation. This is not recommended. \
+                    Please use a `List[<type>]` annotation. \
+                    We are just creating a list with the value and ignoring following env path fragments, which is possibly not what you expected."
+            )
+            result = [value]
+
         return result
 
     def _get_setting_dict_by_env_var(self, env_var_key: str) -> Dict:
         self._get_value_dict_by_env_var_key(env_var_key)
 
-    def get_field_info_by_env_var(self, env_var_key: str) -> FieldInfoContainer:
-        for path_fragment in self._split_env_var(env_var_key):
-            if path_fragment in self.settings.model_fields:
-                field_info = self.settings.model_fields[path_fragment]
-                return FieldInfoContainer(
-                    path=path_fragment,
-                    field_name=path_fragment,
-                    field_info=field_info,
-                )
-
     def _split_env_var(self, env_var_key: str) -> List[str]:
         return env_var_key.split(self.env_var_delimiter)
+
+    def _deep_merge(self, base: Dict | List, update: Dict | List):
+        """Deep merge a complex nested dict/list object. Lists can have `ListitemPlaceholder` which will be recessive while merging
+
+        Args:
+            base (Dict | List): _description_
+            update (Dict | List): _description_
+
+        Raises:
+            ValueError: _description_
+        """
+        if (isinstance(base, dict) or base in (None, PydanticUndefined)) and isinstance(
+            update, dict
+        ):
+            if base in (None, PydanticUndefined):
+                base = {}
+            for key in set(base.keys()).union(update.keys()):
+                if key in base and key in update:
+                    # we have both keys. we need to go deeper
+                    base[key] = self._deep_merge(base[key], update[key])
+                elif key in update:
+                    base[key] = update[key]
+        elif (
+            isinstance(base, list) or base in (None, PydanticUndefined)
+        ) and isinstance(update, list):
+            if base in (None, PydanticUndefined):
+                base = []
+            length = max(len(base), len(update))
+            # Pad the base list, if its shorter
+            base.extend([ListitemPlaceholder] * (length - len(base)))
+            # iter through items and merge them
+            for index, item in enumerate(update):
+                if item != ListitemPlaceholder:
+                    if isinstance(item, (dict, list)):
+                        base[index] = self._deep_merge(base[index], update[index])
+                    else:
+                        base[index] = update[index]
+        elif update is None:
+            pass
+        else:
+            raise ValueError(
+                "Source and update obj are too divergent in structure to be merged."
+            )
+        return base

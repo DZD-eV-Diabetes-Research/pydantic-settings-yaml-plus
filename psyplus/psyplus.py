@@ -20,20 +20,32 @@ import yaml
 
 
 from psyplus.yaml_pydantic_metadata_comment_injector import YamlFileGenerator
+from psyplus.env_var_handler import EnvVarHandler
 
 
 class YamlSettingsPlus:
-    def __init__(self, model: Type[BaseSettings], file_path: Union[str, Path] = None):
+    def __init__(
+        self,
+        model: Type[BaseSettings],
+        file_path: Union[str, Path] = None,
+        parse_finde_grained_env_var: bool = True,
+    ):
+        self.parse_finde_grained_env_var = parse_finde_grained_env_var
         self.config_file: Path = (
             file_path if isinstance(file_path, Path) else Path(file_path)
         )
         self.model: Type[BaseSettings] = model
+        self._settings_cache: BaseSettings = None
 
     def get_config(self) -> BaseSettings:
         with open(self.config_file) as file:
             raw_yaml_object = file.read()
         obj: Dict = yaml.safe_load(raw_yaml_object)
-        return self.model.model_validate(obj)
+        if self.parse_finde_grained_env_var:
+            env_var_handler = EnvVarHandler(self.model)
+            obj = env_var_handler.settings_as_dict
+        self._settings_cache = self.model.model_validate(obj)
+        return
 
     def generate_config_file(self, overwrite_existing: bool = False, exists_ok=True):
         null_placeholder = "NULL_PLACEHOLDER_328472384623746012386389621948"

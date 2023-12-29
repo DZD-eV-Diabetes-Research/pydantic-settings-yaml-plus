@@ -457,4 +457,25 @@ def get_literal_annot():
     print(get_args(clean_annotation(get_type_hints(Test)["testlist"])))
 
 
-get_literal_annot()
+# get_literal_annot()
+
+
+def env_to_dict():
+    import os
+
+    key = "MYDICT__NEXTKEY__WHATEVER"
+    val = "val111"
+
+    parts = key.split("__")
+    result = {}
+    temp = result
+
+    for part in parts[:-1]:
+        temp = temp.setdefault(part, {})
+    temp[parts[-1]] = val
+
+    print(result)
+    return result
+
+
+env_to_dict()

@@ -13,17 +13,23 @@ from psyplus.env_var_handler import EnvVarHandler
 
 from tests.config_test import TestConfig
 
-settings = YamlSettingsPlus(TestConfig, "config.yaml")
+settings_wrapper = YamlSettingsPlus(TestConfig, "config.yaml")
 os.environ[
-    "EXTERNAL_SUBCONFIG_LIST_WITH_EG__1__TEST_SIMPLE_LIST__0"
+    "EXTERNAL_SUBCONFIG_LIST_WITH_EG__0__TEST_SIMPLE_LIST__0"
 ] = "ValueExtravgante"
-e = EnvVarHandler(settings=settings.generate_config_file_with_examples_values())
+os.environ[
+    "EXTERNAL_SUBCONFIG_LIST_WITH_EG__0__TEST_SIMPLE_LIST__1"
+] = "ValueExtravgante2"
+os.environ[
+    "EXTERNAL_SUBCONFIG_LIST_WITH_EG__0__TEST_SIMPLE_LIST1__2"
+] = "ValueExtravgante5"
+os.environ["EXTERNAL_SUBCONFIG_DICT2__DYNAMICDIC"] = "dictval1"
+os.environ["EXTERNAL_SUBCONFIG_DICT2__0__TEST_SIMPLE_LIST1__3"] = "ValueExtravgante6"
+settings = settings_wrapper.generate_config_file_with_examples_values()
+e = EnvVarHandler(settings=settings)
+import yaml
 
-print(
-    e.get_value_dict_by_env_var_key(
-        "EXTERNAL_SUBCONFIG_LIST_WITH_EG__1__TEST_SIMPLE_LIST__0"
-    )
-)
+print("settings", yaml.dump(e.settings.model_dump()))
 exit()
 
 from psyplus import YamlSettingsPlus

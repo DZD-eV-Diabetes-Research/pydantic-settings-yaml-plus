@@ -146,6 +146,31 @@ def get_dict_val_key_insensitive(
     return default
 
 
+def env_to_nested_dict(key: str | List[str], val: Any, delimiter: str = "__") -> Dict:
+    """Convert a env var key to a nestesd dict.
+    e.g.
+    `MYDICT__NEXTKEY__WHATEVER=val111` -> `{'MYDICT': {'NEXTKEY': {'WHATEVER': 'val111'}}}`
+
+    Returns:
+        Dict:
+    """
+
+    if isinstance(key, str):
+        fragments = key.split(delimiter)
+    elif isinstance(key, list):
+        fragments = key
+    else:
+        raise ValueError(f"key must be str or list but is {type(key)}")
+    result = {}
+    temp = result
+
+    for frag in fragments[:-1]:
+        temp = temp.setdefault(frag, {})
+    temp[fragments[-1]] = val
+
+    return result
+
+
 def get_str_dict_as_table(
     d: Dict, vertical_seperator: str = "", respect_line_breaks_in_val: bool = True
 ) -> str:

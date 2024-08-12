@@ -1,3 +1,5 @@
+#  /home/tim/Repos/github.com/DZD-eV-Diabetes-Research/pydantic-settings-yaml-plus/.yamlplusenv/bin/python -m pip install -r reqs.txt --upgrade
 pydantic
 pydantic-settings
 ruamel.yaml
+pyaml

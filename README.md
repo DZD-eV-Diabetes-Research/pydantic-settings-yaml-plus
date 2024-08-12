@@ -1,9 +1,21 @@
 # pydantic-settings-yaml-plus
-A tiny helper class to use pydantic-settings to generate, read and comment your config file in yaml
- work in progress. please ignore this repo for now
+A helper module that builds upon [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/) to generate, read and comment a config file in yaml  
+ 
+> [!WARNING]  
+> work in progress. please ignore this repo for now
 
 
- ## Goals
+## Target use case
+
+The idea is to use this module during the build/release- (deploy on pypi.org) or init(First start)-process of your python module to generate a documented yaml file the user can understand.
+
+## Features
+
+* Generate a commented/documented yaml file based on your `pydantic-settings`.`BaseSettings` class
+* 
+
+
+## Goals
 
 * Have a single source of truth for config and all it meta data (type, descpription, examples)
 * All values are overwritable by env var

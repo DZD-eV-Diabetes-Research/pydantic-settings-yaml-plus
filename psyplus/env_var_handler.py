@@ -82,6 +82,7 @@ class EnvVarHandler:
         settings: BaseSettings | BaseModel | Dict | List = None,
         annotation: Any = None,
         value: Any = None,
+        parent_keys: List[str] = None,
     ) -> Dict:
         if len(env_var_key_splitted) == 0:
             return value
@@ -115,6 +116,7 @@ class EnvVarHandler:
                 settings=next_settings_instance,
                 annotation=next_annotation,
                 value=value,
+                parent_keys=env_var_key_splitted,
             )
         elif get_origin(annotation) == dict:
             next_annotation = get_args(annotation)[1]
@@ -128,17 +130,26 @@ class EnvVarHandler:
                 settings=next_settings_instance,
                 annotation=next_annotation,
                 value=value,
+                parent_keys=env_var_key_splitted,
             )
         elif annotation == dict:
             # omg, we are in the wildlands. any dict is allowed.
             # we just make our best guess by creating a nested dict based on the path fragments
             # TODO: an option, to restrict this would be nice.
-            log.warning(
-                f"Env var key `{env_var_fragment}` is mapped to a simple `dict` annotation. This is not recommended. "
-                + "Please use a `Dict[<type>]` annotation."
-                + "We are just creating a nested dict based on the path fragments, which maybe is not what you expected."
-            )
+            if not os.getenv("PSYPLUS_SUPRESS_MISSING_TYPE_WARNING", None) in [
+                "yes",
+                "true",
+                "1",
+            ]:
+                log.warning(
+                    f"Env var key `{self.env_var_delimiter.join(parent_keys)}` is mapped to a simple `dict` annotation (subkey: '{env_var_key_splitted[0]}', value: `{value}`) in the config model `{self.settings.__class__.__name__}`. This is not recommended. "
+                    + "Please use a `Dict[<type>]` annotation."
+                    + "PsYplus is now creating a nested dict based on the path fragments, which maybe is not what you expected."
+                    + "Set env var 'PSYPLUS_SUPRESS_MISSING_TYPE_WARNING=true' to supress this warning."
+                )
+
             result = env_to_nested_dict(env_var_key_splitted, value)
+
         elif get_origin(annotation) == list:
             next_annotation = get_args(annotation)[0]
             # fill up list with placeholder to respect the env vars given index
@@ -156,16 +167,23 @@ class EnvVarHandler:
                     settings=next_settings_instance,
                     annotation=next_annotation,
                     value=value,
+                    parent_keys=env_var_key_splitted,
                 )
             )
         elif annotation == list:
             # omg, any list is allowed.
             # this is stupid. lets output a warning and just make a simple list the value
-            log.warning(
-                f"Env var key `{env_var_fragment}` is mapped to a simple `list` annotation. This is not recommended. \
-                    Please use a `List[<type>]` annotation. \
-                    We are just creating a list with the value and ignoring following env path fragments, which is possibly not what you expected."
-            )
+            if not os.getenv("PSYPLUS_SUPRESS_MISSING_TYPE_WARNING", None) in [
+                "yes",
+                "true",
+                "1",
+            ]:
+                log.warning(
+                    f"Env var key `{self.env_var_delimiter.join(parent_keys)}` is mapped to a simple `list` annotation. This is not recommended. "
+                    + "Please use a `List[<type>]` annotation. "
+                    + "We are just creating a list with the value and ignoring following env path fragments, which is possibly not what you expected."
+                    + "Set env var 'PSYPLUS_SUPRESS_MISSING_TYPE_WARNING=true' to supress this warning."
+                )
             result = [value]
 
         return result

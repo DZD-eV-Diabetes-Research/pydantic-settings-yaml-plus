@@ -60,9 +60,21 @@ os.environ["DATABASE_SERVER__DATABASE_SERVER"] = "server.com"
 os.environ["DATABASE_SERVER__INIT_VALUES"] = "{}"
 os.environ["DATABASE_SERVER__DATABASE_NAMES__0"] = "DB01"
 os.environ["DATABASE_SERVER__DATABASE_NAMES__1"] = "DB02"
-from psyplus import YamlSettingsPlus, EnvVarHandlerExtended
+from psyplus import YamlSettingsPlus
+
+yaml_handler = YamlSettingsPlus(MyAppConfig, "test.config.yaml")
+config: MyAppConfig = yaml_handler.get_config()
 
 
+import yaml  # pip install PyYAML
+
+with open("test.config.yaml") as file:
+    raw_yaml_str = file.read()
+obj: Dict = yaml.safe_load(raw_yaml_str)
+config: MyAppConfig = MyAppConfig.model_validate(obj)
+
+
+MyAppConfig.model_validate
 app_config = MyAppConfig()
-EnvVarHandlerExtended(app_config)
-print(app_config.database_server.database_names)
+# EnvVarHandlerExtended(app_config)
+# print(app_config.database_server.database_names)

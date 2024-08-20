@@ -43,11 +43,13 @@ A helper module that builds upon [pydantic-settings](https://docs.pydantic.dev/l
 * Make pypi package
 
 ### Ideas/Roadmap
+* Generate a mark down doc of all settings
 * Generate template (minimal with required values only or maximum with all values listed) and example config files (all YAML only!)
 * generate diff betwen current config and config model (when config model changed after update)
 * update existing config files metadata
   * Update info, descs
   * Add missing/new required values
+  
 
 
 
@@ -194,4 +196,25 @@ database_server:
   #  >- theotherdb
   database_names: []
 ```
+  
+To use this yaml file you just psyplus: need to parse it and validate on your pydantic-setting model.
+  
+```python
+from psyplus import YamlSettingsPlus
 
+yaml_handler = YamlSettingsPlus(MyAppConfig, "test.config.yaml")
+config: MyAppConfig = yaml_handler.get_config()
+print(config.database_server.host)
+```
+  
+Alternativly you can parse and validate the pydantic-settings model yourself:
+  
+```
+import yaml  # pip install PyYAML
+
+with open("test.config.yaml") as file:
+    raw_yaml_str = file.read()
+obj: Dict = yaml.safe_load(raw_yaml_str)
+config: MyAppConfig = MyAppConfig.model_validate(obj)
+
+```

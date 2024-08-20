@@ -23,8 +23,6 @@ def annofields():
         test_tuple: Tuple[int, int]
 
     for key, field in myClass.model_fields.items():
-        print("---------", key)
-        print(field.metadata)
 
         """
         if hasattr(annotation, "__origin__"):

@@ -9,7 +9,7 @@ if __name__ == "__main__":
     sys.path.insert(0, os.path.normpath(MODULE_ROOT_DIR))
 
 from psyplus import YamlSettingsPlus
-from psyplus.env_var_handler import EnvVarHandlerExtended
+from psyplus.env_var_handler import EnvVarHandler
 
 # from tests.config_test import TestConfig
 from tests.config_readme_example import TestConfig
@@ -27,7 +27,7 @@ os.environ["EXTERNAL_SUBCONFIG_LIST_WITH_EG__0__TEST_SIMPLE_LIST1__2"] = (
 os.environ["EXTERNAL_SUBCONFIG_DICT2__DYNAMICDIC"] = "dictval1"
 os.environ["EXTERNAL_SUBCONFIG_DICT2__0__TEST_SIMPLE_LIST1__3"] = "ValueExtravgante6"
 settings = settings_wrapper.generate_config_file_with_examples_values()
-e = EnvVarHandlerExtended(settings=settings)
+e = EnvVarHandler(settings=settings)
 import yaml
 
 print("settings", yaml.dump(e.settings.model_dump()))

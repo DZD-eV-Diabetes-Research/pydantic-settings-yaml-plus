@@ -76,5 +76,5 @@ config: MyAppConfig = MyAppConfig.model_validate(obj)
 
 MyAppConfig.model_validate
 app_config = MyAppConfig()
-# EnvVarHandlerExtended(app_config)
+# EnvVarHandler(app_config)
 # print(app_config.database_server.database_names)

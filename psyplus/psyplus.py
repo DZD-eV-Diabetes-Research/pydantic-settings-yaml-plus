@@ -20,7 +20,7 @@ import yaml
 
 
 from psyplus.yaml_pydantic_metadata_comment_injector import YamlFileGenerator
-from psyplus.env_var_handler import EnvVarHandlerExtended
+from psyplus.env_var_handler import EnvVarHandler
 
 
 class YamlSettingsPlus:
@@ -42,7 +42,7 @@ class YamlSettingsPlus:
             raw_yaml_object = file.read()
         obj: Dict = yaml.safe_load(raw_yaml_object)
         if self.parse_finde_grained_env_var:
-            env_var_handler = EnvVarHandlerExtended(self.model)
+            env_var_handler = EnvVarHandler(self.model)
             obj = env_var_handler.settings_as_dict
         self._settings_cache = self.model.model_validate(obj)
         return

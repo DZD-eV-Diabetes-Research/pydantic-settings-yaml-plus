@@ -209,7 +209,7 @@ print(config.database_server.host)
   
 Alternativly you can parse and validate the pydantic-settings model yourself:
   
-```
+```python
 import yaml  # pip install PyYAML
 
 with open("test.config.yaml") as file:

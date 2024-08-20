@@ -70,7 +70,7 @@ class YamlSettingsPlus:
         dummy_values = self._get_fields_filler(
             required_only=True, use_example_values_if_exists=True
         )
-        print("dummy_values", dummy_values)
+        # print("dummy_values", dummy_values)
         config = self.model.model_validate(dummy_values)
         return config
         filegen = YamlFileGenerator(config)
@@ -151,13 +151,8 @@ class YamlSettingsPlus:
         def parse_model_class(m_cls: Type[BaseSettings | BaseModel]) -> Dict:
             result: Dict = {}
             for key, field in m_cls.model_fields.items():
-                if key == "only_for_groupnames_starting_with":
-                    print(
-                        "only_for_groupnames_starting_with.is_required()",
-                        field.is_required(),
-                    )
-                # if not required_only or field.is_required():
-                if True:
+                if not required_only or field.is_required():
+                    # if True:
                     if use_example_values_if_exists and field.examples:
                         example = field.examples[0]
                         # We want to generate a example models and there are examples in the annotation
@@ -178,7 +173,7 @@ class YamlSettingsPlus:
                         if field.default is not PydanticUndefined:
                             result[key] = field.default
                         elif field.default_factory is not None:
-                            print("field.default_factory", field.default_factory)
+                            # print("field.default_factory", field.default_factory)
                             result[key] = field.default_factory()
                         else:
                             result[key] = parse_model_class(field.annotation)

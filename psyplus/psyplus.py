@@ -20,7 +20,7 @@ import yaml
 
 
 from psyplus.yaml_pydantic_metadata_comment_injector import YamlFileGenerator
-from psyplus.env_var_handler import EnvVarHandler
+from psyplus.env_var_handler import EnvVarHandlerExtended
 
 
 class YamlSettingsPlus:
@@ -42,7 +42,7 @@ class YamlSettingsPlus:
             raw_yaml_object = file.read()
         obj: Dict = yaml.safe_load(raw_yaml_object)
         if self.parse_finde_grained_env_var:
-            env_var_handler = EnvVarHandler(self.model)
+            env_var_handler = EnvVarHandlerExtended(self.model)
             obj = env_var_handler.settings_as_dict
         self._settings_cache = self.model.model_validate(obj)
         return
@@ -54,6 +54,7 @@ class YamlSettingsPlus:
             use_example_values_if_exists=False,
             fallback_fill_value=null_placeholder,
         )
+        # print("dummy_values", dummy_values)
         config = self.model.model_validate(dummy_values)
         self._generate_file(
             config,
@@ -69,7 +70,7 @@ class YamlSettingsPlus:
         dummy_values = self._get_fields_filler(
             required_only=True, use_example_values_if_exists=True
         )
-        # print("dummy_values", dummy_values)
+        print("dummy_values", dummy_values)
         config = self.model.model_validate(dummy_values)
         return config
         filegen = YamlFileGenerator(config)
@@ -119,28 +120,16 @@ class YamlSettingsPlus:
         if replace_pattern is None:
             replace_pattern = {}
         yaml_content: str = yaml.dump(config.model_dump(), sort_keys=False)
-        from psyplus.yaml_pydantic_metadata_comment_injector import (
-            YamlPydanticMetadataCommentInjector,
-            YamlFile,
-        )
+        from psyplus.yaml_pydantic_metadata_comment_injector import YamlFileGenerator
 
-        YamlFile(yaml=yaml_content)
-
-        yaml_content_with_comment = YamlPydanticMetadataCommentInjector(
-            yaml=yaml_content, settings=config
-        ).output_yaml
+        y = YamlFileGenerator(settings_instance=config)
+        y.parse_pydantic_model()
+        yaml_content = y.get_yaml()
+        for key, val in replace_pattern.items():
+            yaml_content = yaml_content.replace(key, val)
 
         with open(self.config_file, "w") as file:
-            lines = []
-
-            if not replace_pattern:
-                lines = yaml_content_with_comment.split("\n")
-            else:
-                for line in yaml_content_with_comment:
-                    for key, val in replace_pattern.items():
-                        lines.append(f"{line.replace(key, val)}")
-            for l in lines:
-                file.write(l + "\n")
+            file.write(yaml_content)
 
     def _get_fields_filler(
         self,
@@ -162,7 +151,13 @@ class YamlSettingsPlus:
         def parse_model_class(m_cls: Type[BaseSettings | BaseModel]) -> Dict:
             result: Dict = {}
             for key, field in m_cls.model_fields.items():
-                if not required_only or field.is_required():
+                if key == "only_for_groupnames_starting_with":
+                    print(
+                        "only_for_groupnames_starting_with.is_required()",
+                        field.is_required(),
+                    )
+                # if not required_only or field.is_required():
+                if True:
                     if use_example_values_if_exists and field.examples:
                         example = field.examples[0]
                         # We want to generate a example models and there are examples in the annotation
@@ -183,6 +178,7 @@ class YamlSettingsPlus:
                         if field.default is not PydanticUndefined:
                             result[key] = field.default
                         elif field.default_factory is not None:
+                            print("field.default_factory", field.default_factory)
                             result[key] = field.default_factory()
                         else:
                             result[key] = parse_model_class(field.annotation)
@@ -221,5 +217,7 @@ class YamlSettingsPlus:
             return [self.jsonfy_example(i) for i in val]
         elif isinstance(val, BaseModel):
             return val.model_dump_json()
-        else:
+        elif val is not None:
             return str(val)
+        else:
+            return None

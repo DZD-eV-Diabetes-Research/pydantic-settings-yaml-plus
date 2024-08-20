@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+[tool.setuptools-git-versioning]
+enabled = true
+[tool.setuptools_scm]
+version_scheme = "guess-next-dev"
+local_scheme = "node-and-date"
+root = "./"
+[project]
+name = "psyplus"
+authors = [{ name = "Tim Bleimehl", email = "bleimehl@helmholtz-munich.de" }]
+description = "A helper module that builds upon pydantic-settings to generate, read and comment a config file in yaml"
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = ["DZD", "pydantic", "pydantic-settings"]
+license = { text = "MIT" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = ["pydantic", "pydantic-setting", "ruamel.yaml", "pyaml"]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+#test = ["pytest", "deepdiff"]
+#docs = ["mkdocs", "mkdocstrings[python]", "mkdocs-autorefs", "mkdocs-material"]
+[project.urls]
+Source = "https://github.com/DZD-eV-Diabetes-Research/pydantic-settings-yaml-plus"
+Issues = "https://github.com/DZD-eV-Diabetes-Research/pydantic-settings-yaml-plus/issues"

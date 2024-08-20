@@ -478,4 +478,15 @@ def env_to_dict():
     return result
 
 
-env_to_dict()
+def get_seperators():
+    from pydantic_settings import BaseSettings
+
+    class Conf(BaseSettings):
+        val: int = 1
+
+        class Config:
+            # (meta)config class for pydantic-settings https://docs.pydantic.dev/latest/usage/settings/
+            env_prefix: str = "ONBOT_"
+            env_nested_delimiter: str = "__"
+
+    Conf.Config.env_prefix

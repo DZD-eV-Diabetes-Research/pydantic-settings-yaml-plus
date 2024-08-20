@@ -18,8 +18,8 @@ from psyplus.utils import (
     indent_multilines,
 )
 
-ENV_VAR_LISTINDEX_PLACEHOLDER: str = "<LISTINDEX>"
-ENV_VAR_DICTKEY_PLACEHOLDER: str = "<DICTKEY>"
+ENV_VAR_LISTINDEX_PLACEHOLDER: str = "<list-index>"
+ENV_VAR_DICTKEY_PLACEHOLDER: str = "<dict-key>"
 
 
 @dataclass
@@ -47,16 +47,6 @@ class FieldInfoContainer:
     field_name: str
     field_info: fields.FieldInfo | None = None
     annotation: Any = None
-
-    @classmethod
-    def get_by_env_var(
-        cls,
-        env_var_key: str,
-        settings: BaseModel | BaseSettings,
-        env_var_delimiter: str = "__",
-        prefix: str = "",
-    ) -> Self:
-        pass
 
     def get_annotation(self) -> Any:
         if self.field_info:
@@ -175,7 +165,7 @@ class FieldInfoContainer:
                 indent_multilines(
                     text=example_as_yaml.split("\n"),
                     indent_depth=0,
-                    line_prefix=" >",
+                    line_prefix=">",
                     extra_indent_depth_after_prefix=indent_depth,
                     add_extra_indent_for_subsequent_lines_after_line_prefix=False,
                 )

@@ -13,6 +13,13 @@ from psyplus.utils import (
 import logging
 
 log = logging.getLogger(__name__)
+######
+# WIP - needs total rewrite
+######
+# This is gargabe atm.
+# pydantic-settings 2.x does most the thing now i tried to achieve here.
+# todo: only thing left is indexes env var e.g. `MY_LIST__0=1`,`MY_DICT__KEY1=2`, `MY_OBJ_LIST__0__OBJ0_ATTR=Hello`
+#
 
 
 class ListitemPlaceholder:
@@ -135,7 +142,6 @@ class EnvVarHandler:
         elif annotation == dict:
             # omg, we are in the wildlands. any dict is allowed.
             # we just make our best guess by creating a nested dict based on the path fragments
-            # TODO: an option, to restrict this would be nice.
             if not os.getenv("PSYPLUS_SUPRESS_MISSING_TYPE_WARNING", None) in [
                 "yes",
                 "true",

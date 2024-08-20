@@ -71,9 +71,9 @@ def python_annotation_to_generic_readable(
         elif get_origin(annot) == dict or annot == dict:
             dict_annotation_args = get_args(annot)
             if dict_annotation_args:
-                return f"Dictonary of ({stringifiy_annotation(get_args(annot))})"
+                return f"Dictionary of ({stringifiy_annotation(get_args(annot))})"
             else:
-                return "Dictonary"
+                return "Dictionary"
         elif get_origin(annot) == Literal:
             return "Enum"
         else:

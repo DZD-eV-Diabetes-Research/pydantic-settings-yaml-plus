@@ -143,7 +143,7 @@ class TestConfig(BaseSettings):
 
         # only sync user from specific pathes.
         # e.g. '["users"]'
-        sync_only_users_in_authentik_pathes: List[str] = None
+        sync_only_users_in_authentik_pathes: Optional[List[str]] = None
 
         # works only for custom attributes in the authentik "attribute"-field. must be provided as dict/json.
         # e.g. '{"is_chat_user":true}'
@@ -184,9 +184,9 @@ class TestConfig(BaseSettings):
                 ),
             ] = False
 
-        deactivate_disabled_authentik_users_in_matrix: DeactivateDisabledAuthentikUsersInMatrix = (
-            DeactivateDisabledAuthentikUsersInMatrix()
-        )
+        deactivate_disabled_authentik_users_in_matrix: (
+            DeactivateDisabledAuthentikUsersInMatrix
+        ) = DeactivateDisabledAuthentikUsersInMatrix()
 
     sync_authentik_users_with_matrix_rooms: SyncAuthentikUsersWithMatrix = (
         SyncAuthentikUsersWithMatrix()
@@ -194,7 +194,9 @@ class TestConfig(BaseSettings):
 
     class CreateMatrixRoomsInAMatrixSpace(BaseModel):
         enabled: bool = True
-        alias: str = "MyCompanySpace"  # the name part of a "canonical_alias". e.g. if the room canonical alias is (or should be) "#MyCompanySpace:matrix.company.org", enter "MyCompanySpace" here
+        alias: str = (
+            "MyCompanySpace"  # the name part of a "canonical_alias". e.g. if the room canonical alias is (or should be) "#MyCompanySpace:matrix.company.org", enter "MyCompanySpace" here
+        )
 
         class CreateMatrixSpaceIfNotExists(BaseModel):
             enabled: bool = True
@@ -230,7 +232,7 @@ class TestConfig(BaseSettings):
 
     class SyncMatrixRoomsBasedOnAuthentikGroups(BaseModel):
         enabled: bool = True
-        only_for_children_of_groups_with_uid: Optional[List[str]]
+        only_for_children_of_groups_with_uid: Optional[List[str]] = None
         only_groups_with_attributes: Annotated[
             Optional[Dict],
             Field(
@@ -241,8 +243,8 @@ class TestConfig(BaseSettings):
                 ),
                 examples=[{"is_chatroom": True}],
             ),
-        ]
-        only_for_groupnames_starting_with: Optional[str]
+        ] = None
+        only_for_groupnames_starting_with: str = None
         disable_rooms_when_mapped_authentik_group_disappears: Annotated[
             bool,
             Field(
@@ -278,9 +280,9 @@ class TestConfig(BaseSettings):
         name_prefix: Optional[str] = None
         matrix_name_from_authentik_attribute: str = "name"
         topic_prefix: Optional[str] = None
-        matrix_topic_from_authentik_attribute: Optional[
-            str
-        ] = "attributes.chatroom_topic"
+        matrix_topic_from_authentik_attribute: Optional[str] = (
+            "attributes.chatroom_topic"
+        )
         end2end_encryption_enabled: Annotated[
             bool,
             Field(
@@ -303,9 +305,9 @@ class TestConfig(BaseSettings):
         # see https://matrix-nio.readthedocs.io/en/latest/nio.html#nio.AsyncClient.room_create for possible params
         # params need to be provided as json
         # e.g. '{"preset": "private_chat", "visibility": "private", "federate": false}'
-        matrix_room_create_params_from_authentik_attribute: Optional[
-            str
-        ] = "attribute.chatroom_params"
+        matrix_room_create_params_from_authentik_attribute: Optional[str] = (
+            "attribute.chatroom_params"
+        )
 
         keep_updating_matrix_attributes_from_authentik: Annotated[
             Optional[bool],
@@ -377,9 +379,9 @@ class TestConfig(BaseSettings):
             ),
         ] = False
 
-    deactivate_disabled_authentik_users_in_matrix: DeactivateDisabledAuthentikUsersInMatrix = (
-        DeactivateDisabledAuthentikUsersInMatrix()
-    )
+    deactivate_disabled_authentik_users_in_matrix: (
+        DeactivateDisabledAuthentikUsersInMatrix
+    ) = DeactivateDisabledAuthentikUsersInMatrix()
 
     class Config:
         # (meta)config class for pydantic-settings https://docs.pydantic.dev/latest/usage/settings/

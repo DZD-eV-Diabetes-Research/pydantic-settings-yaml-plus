@@ -1,13 +1,16 @@
+import os
 from pydantic import fields, BaseModel
 from pydantic_settings import BaseSettings
-from typing import List, Any
+from typing import List, Any, Optional
 from typing_extensions import Self
 import yaml
 
 from dataclasses import dataclass
 from pydantic_core import PydanticUndefined
 import json
+import logging
 
+log = logging.getLogger()
 
 from psyplus.utils import (
     nested_pydantic_to_dict,
@@ -45,6 +48,7 @@ class FieldInfoContainer:
 
     path: List[str | ListIndex | DictKey]
     field_name: str
+    root_settings_model: BaseSettings | BaseModel
     field_info: fields.FieldInfo | None = None
     annotation: Any = None
 
@@ -53,9 +57,22 @@ class FieldInfoContainer:
             return self.field_info.annotation
         return self.annotation
 
-    def get_env_var_scheme(
-        self, env_var_delimiter: str = "__", prefix: str = ""
-    ) -> str:
+    def get_env_var_scheme(self) -> str:
+        env_var_delimiter = self.root_settings_model.model_config[
+            "env_nested_delimiter"
+        ]
+        prefix = self.root_settings_model.model_config["env_prefix"]
+        if (
+            len(self.path) > 1
+            and not env_var_delimiter
+            and os.getenv("PSYPLUS_SUPPRESS_MISSING_ENV_VAR_DELIMITER_WARNING", None)
+            not in ["True", "true", "y", "yes", "1", 1]
+        ):
+            log.warning(
+                f"Nested pydantic-setting model but no `env_nested_delimiter`. You should set the `env_nested_delimiter` in your pydantic-settings class (`{self.root_settings_model.__class__}`) (See https://docs.pydantic.dev/dev/concepts/pydantic_settings/#dotenv-env-support for an example how to configure your model). You also suppress this warning with the env var `PSYPLUS_SUPPRESS_MISSING_ENV_VAR_DELIMITER_WARNING=true` if you are sure in what you are doing."
+            )
+        if env_var_delimiter is None:
+            env_var_delimiter = ""
         result = []
         for key in self.path:
             if isinstance(key, str):
@@ -102,13 +119,14 @@ class FieldInfoContainer:
         comment.extend(get_str_dict_as_table(data_header).rstrip().split("\n"))
         return comment
 
-    def get_field_comment_header(self):
+    def get_field_comment_header(self, overwrite_required: Optional[bool] = None):
         comment: List[str] = []
         data_header = {}
         # Title
         key = self.field_name
         path = self.get_path_str()
         header_line = f"## {key}"
+        # print("self.field_info", self.field_name, self.field_info, fields.FieldInfo())
         field_info: fields.FieldInfo = (
             self.field_info if self.field_info else fields.FieldInfo()
         )
@@ -123,10 +141,18 @@ class FieldInfoContainer:
 
         if self.get_type_annotation_string():
             data_header["Type: "] = f"{self.get_type_annotation_string()}"
-        data_header["Required: "] = f"{field_info.is_required()}"
+        # print("field_info", field_info)
+        data_header["Required: "] = (
+            f"{field_info.is_required()}"
+            if overwrite_required is None
+            else f"{overwrite_required}"
+        )
         if hasattr(field_info, "default") and field_info.default != PydanticUndefined:
             if field_info.default is not None:
-                def_val = f"'{json.dumps(nested_pydantic_to_dict(field_info.default))}'"
+
+                def_val = json.dumps(nested_pydantic_to_dict(field_info.default))
+                if def_val.startswith(("{", "[")):
+                    def_val = f"'{def_val}'"
             else:
                 def_val = "null/None"
             data_header["Default: "] = def_val

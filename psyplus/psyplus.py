@@ -50,11 +50,10 @@ class YamlSettingsPlus:
     def generate_config_file(self, overwrite_existing: bool = False, exists_ok=True):
         null_placeholder = "NULL_PLACEHOLDER_328472384623746012386389621948"
         dummy_values = self._get_fields_filler(
-            required_only=False,
+            required_only=True,
             use_example_values_if_exists=False,
             fallback_fill_value=null_placeholder,
         )
-        # print("dummy_values", dummy_values)
         config = self.model.model_validate(dummy_values)
         self._generate_file(
             config,
@@ -64,6 +63,7 @@ class YamlSettingsPlus:
             replace_pattern={null_placeholder: "null"},
         )
 
+    """
     def generate_config_file_with_examples_values(
         self, overwrite_existing: bool = False
     ):
@@ -94,6 +94,7 @@ class YamlSettingsPlus:
             )
         )
         self._generate_file(config, generate_with_optional_fields=False)
+    """
 
     def generate_markdown_doc(self):
         raise NotImplementedError()
@@ -127,7 +128,7 @@ class YamlSettingsPlus:
         yaml_content = y.get_yaml()
         for key, val in replace_pattern.items():
             yaml_content = yaml_content.replace(key, val)
-
+        # print("yaml_content", yaml_content)
         with open(self.config_file, "w") as file:
             file.write(yaml_content)
 
@@ -135,7 +136,7 @@ class YamlSettingsPlus:
         self,
         required_only: bool = True,
         use_example_values_if_exists: bool = False,
-        fallback_fill_value: Any = "",
+        fallback_fill_value: Any = PydanticUndefined,
     ) -> Dict:
         """Needed for creating dummy values for non nullable values. Otherwise we are not able to initialize a living config from the model
 
@@ -152,12 +153,10 @@ class YamlSettingsPlus:
             result: Dict = {}
             for key, field in m_cls.model_fields.items():
                 if not required_only or field.is_required():
-                    # if True:
                     if use_example_values_if_exists and field.examples:
                         example = field.examples[0]
                         # We want to generate a example models and there are examples in the annotation
                         # if it is a real config object we pass it to as a values else we try to create a json compatible string
-
                         result[key] = example
                         """
                         if inspect.isclass(field.annotation) and issubclass(
@@ -167,18 +166,19 @@ class YamlSettingsPlus:
                         else:
                             result[key] = self.jsonfy_example(example)
                         """
+                    elif field.default is not PydanticUndefined:
+                        result[key] = field.default
+                    elif field.default_factory is not None:
+                        result[key] = field.default_factory()
                     elif inspect.isclass(field.annotation) and issubclass(
                         field.annotation, BaseModel | BaseSettings
                     ):
-                        if field.default is not PydanticUndefined:
-                            result[key] = field.default
-                        elif field.default_factory is not None:
-                            # print("field.default_factory", field.default_factory)
-                            result[key] = field.default_factory()
-                        else:
-                            result[key] = parse_model_class(field.annotation)
+                        result[key] = parse_model_class(field.annotation)
                     elif field.annotation == Any:
                         result[key] = ""
+                    elif fallback_fill_value is not PydanticUndefined:
+                        result[key] = fallback_fill_value
+
                     elif type(field.annotation) in (typing._GenericAlias, type):
                         # This is a basic type. we can provide some reasonable sane default values like 0 for int or "" for str
                         if hasattr(field.annotation, "__origin__"):
@@ -187,17 +187,19 @@ class YamlSettingsPlus:
                             # we have a basic type
                             result[key] = field.annotation()
 
-                    elif (
-                        isinstance(field, fields.FieldInfo)
-                        and field.default_factory is not None
-                    ):
-                        result[key] = self.jsonfy_example(field.default_factory())
+                    # elif (
+                    #    isinstance(field, fields.FieldInfo)
+                    #    and field.default_factory is not None
+                    # ):
+                    #    result[key] = self.jsonfy_example(field.default_factory())
                     else:
+
                         result[key] = (
                             fallback_fill_value
                             if field.is_required()
                             else self.jsonfy_example(field.default)
                         )
+
             return result
 
         return parse_model_class(self.model)

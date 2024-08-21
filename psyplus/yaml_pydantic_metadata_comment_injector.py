@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, fields
 from pydantic_settings import BaseSettings
 from typing import List, get_args, Any
 
@@ -54,7 +54,10 @@ class YamlFileGenerator:
             else:
                 result[key] = field_value
             header_comment = FieldInfoContainer(
-                path=path, field_name=key, field_info=field_info
+                path=path,
+                field_name=key,
+                field_info=field_info,
+                root_settings_model=self.settings,
             ).get_field_comment_header()
             result.yaml_set_comment_before_after_key(
                 key=key,
@@ -91,7 +94,10 @@ class YamlFileGenerator:
                 else:
                     result[key] = val
                 header_comment = FieldInfoContainer(
-                    path=path, field_name=key, annotation=field_annotation
+                    path=path,
+                    field_name=key,
+                    annotation=field_annotation,
+                    root_settings_model=self.settings,
                 ).get_field_comment_header()
                 result.yaml_set_comment_before_after_key(
                     key=key,
@@ -124,11 +130,13 @@ class YamlFileGenerator:
                     )
                 else:
                     result.append(item)
+
                 header_comment = FieldInfoContainer(
                     path=path,
                     field_name=f"List[{index}]",
                     annotation=list_val_annotation,
-                ).get_field_comment_header()
+                    root_settings_model=self.settings,
+                ).get_field_comment_header(overwrite_required=False)
                 result.yaml_set_comment_before_after_key(
                     key=index,
                     before="\n" + "\n".join(header_comment),

@@ -1,32 +1,55 @@
 [build-system]
-requires = ["setuptools", "setuptools-git-versioning"]
-build-backend = "setuptools.build_meta"
-[tool.setuptools-git-versioning]
-enabled = true
-#[tool.setuptools_scm]
-#version_scheme = "guess-next-dev"
-#local_scheme = "node-and-date"
-#root = "./"
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[tool.pdm.version]
+source = "scm"
+
 [project]
 name = "psyplus"
+dynamic = ["version"]
 authors = [{ name = "Tim Bleimehl", email = "bleimehl@helmholtz-munich.de" }]
-description = "A helper module that builds upon pydantic-settings to generate, read and comment a config file in yaml"
+description = "Generate, read and document pydantic-settings config files in YAML"
 readme = "README.md"
-requires-python = ">=3.10"
-keywords = ["DZD", "pydantic", "pydantic-settings"]
+requires-python = ">=3.12"
+keywords = ["DZD", "pydantic", "pydantic-settings", "yaml", "config"]
 license = { text = "MIT" }
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
-dependencies = ["pydantic", "pydantic-settings", "ruamel.yaml", "pyaml"]
-dynamic = ["version"]
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-settings>=2.3",
+    "ruamel.yaml>=0.17",
+    "pyyaml>=6.0",
+]
 
 [project.optional-dependencies]
-#test = ["pytest", "deepdiff"]
-#docs = ["mkdocs", "mkdocstrings[python]", "mkdocs-autorefs", "mkdocs-material"]
+test = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+]
+
 [project.urls]
 Source = "https://github.com/DZD-eV-Diabetes-Research/pydantic-settings-yaml-plus"
 Issues = "https://github.com/DZD-eV-Diabetes-Research/pydantic-settings-yaml-plus/issues"
+
+[tool.pdm.scripts]
+smoke = "python scripts/smoke.py"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["psyplus"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+show_missing = true

@@ -1,0 +1,110 @@
+
+# ## a_string ###
+# Type:     str
+# Required: False
+# Default:  "hello"
+# Env-var:  'SIMPLE_A_STRING'
+a_string: hello
+
+# ## an_int ###
+# Type:     int
+# Required: False
+# Default:  42
+# Env-var:  'SIMPLE_AN_INT'
+an_int: 42
+
+# ## a_float ###
+# Type:     float
+# Required: False
+# Default:  3.14
+# Env-var:  'SIMPLE_A_FLOAT'
+a_float: 3.14
+
+# ## a_bool ###
+# Type:     bool
+# Required: False
+# Default:  true
+# Env-var:  'SIMPLE_A_BOOL'
+a_bool: true
+
+# ## optional_none ###
+# Type:     str
+# Required: False
+# Default:  null
+# Env-var:  'SIMPLE_OPTIONAL_NONE'
+optional_none:
+
+# ## literal_field ###
+# Type:         Enum
+# Required:     False
+# Default:      "A"
+# Allowed vals: ['A', 'B', 'C']
+# Env-var:      'SIMPLE_LITERAL_FIELD'
+literal_field: A
+
+# ## string_list ###
+# Type:     List of str
+# Required: False
+# Default:  ["x", "y"]
+# Env-var:  'SIMPLE_STRING_LIST'
+string_list:
+
+  # ## List[0] ###
+  # YAML-path: string_list.[0]
+  # Type:      str
+  # Required:  False
+  # Env-var:   'SIMPLE_STRING_LIST<list-index>'
+  - x
+
+  # ## List[1] ###
+  # YAML-path: string_list.[1]
+  # Type:      str
+  # Required:  False
+  # Env-var:   'SIMPLE_STRING_LIST<list-index>'
+  - y
+
+# ## string_dict ###
+# Type:     Dictionary of (str, int)
+# Required: False
+# Default:  {"one": 1}
+# Env-var:  'SIMPLE_STRING_DICT'
+string_dict:
+
+  # ## one ###
+  # YAML-path: string_dict.['one']
+  # Type:      int
+  # Required:  True
+  # Env-var:   'SIMPLE_STRING_DICT<dict-key>'
+  one: 1
+
+# ## required_string ###
+# Type:     str
+# Required: True
+# Env-var:  'SIMPLE_REQUIRED_STRING'
+required_string: ''
+
+# ## required_list ###
+# Type:     List of str
+# Required: True
+# Env-var:  'SIMPLE_REQUIRED_LIST'
+required_list: []
+
+# ## fully_documented - Great String ###
+# Type:        str
+# Required:    False
+# Default:     "default_value"
+# Constraints: MaxLen(max_length=100)
+# Env-var:     'SIMPLE_FULLY_DOCUMENTED'
+# Description: A fully documented optional string field.
+# Example No. 1:
+#  >fully_documented: ex1
+# Example No. 2:
+#  >fully_documented: ex2
+fully_documented: default_value
+
+# ## with_factory ###
+# Type:        str
+# Required:    False
+# Env-var:     'SIMPLE_WITH_FACTORY'
+# Description: Uses a default_factory lambda.
+with_factory: from_factory

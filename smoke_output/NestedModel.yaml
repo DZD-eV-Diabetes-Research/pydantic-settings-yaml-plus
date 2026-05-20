@@ -1,0 +1,78 @@
+
+# ## app_name ###
+# Type:        str
+# Required:    False
+# Default:     "My App"
+# Env-var:     'APP_APP_NAME'
+# Description: Display name of the application
+app_name: My App
+
+# ## log_level ###
+# Type:         Enum
+# Required:     False
+# Default:      "INFO"
+# Allowed vals: ['DEBUG', 'INFO', 'WARNING', 'ERROR']
+# Env-var:      'APP_LOG_LEVEL'
+log_level: INFO
+
+# ## database ###
+# Type:        Object (DatabaseConfig)
+# Required:    True
+# Env-var:     'APP_DATABASE'
+# Description: Primary database settings
+database:
+
+  # ## host ###
+  # YAML-path:   database.host
+  # Type:        str
+  # Required:    False
+  # Default:     "localhost"
+  # Env-var:     'APP_DATABASE__HOST'
+  # Description: Database host
+  host: localhost
+
+  # ## port ###
+  # YAML-path:   database.port
+  # Type:        int
+  # Required:    False
+  # Default:     5432
+  # Env-var:     'APP_DATABASE__PORT'
+  # Description: Database port
+  port: 5432
+
+  # ## name ###
+  # YAML-path:   database.name
+  # Type:        str
+  # Required:    True
+  # Env-var:     'APP_DATABASE__NAME'
+  # Description: Database name (required)
+  name: ''
+
+  # ## tags ###
+  # YAML-path: database.tags
+  # Type:      List of str
+  # Required:  False
+  # Default:   []
+  # Env-var:   'APP_DATABASE__TAGS'
+  tags: []
+
+# ## cache ###
+# Type:     Object (CacheConfig)
+# Required: False
+# Default:  null
+# Env-var:  'APP_CACHE'
+cache:
+
+# ## storage_dir ###
+# Type:        str
+# Required:    False
+# Env-var:     'APP_STORAGE_DIR'
+# Description: Directory for application state.
+storage_dir: /home/tim/.config/app
+
+# ## admin_password ###
+# Type:        str
+# Required:    True
+# Env-var:     'APP_ADMIN_PASSWORD'
+# Description: Initial admin password (required)
+admin_password: ''

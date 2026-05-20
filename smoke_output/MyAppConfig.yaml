@@ -1,0 +1,84 @@
+
+# ## log_level ###
+# Type:         Enum
+# Required:     False
+# Default:      "INFO"
+# Allowed vals: ['INFO', 'DEBUG']
+# Env-var:      'APP_LOG_LEVEL'
+log_level: INFO
+
+# ## app_name ###
+# Type:        str
+# Required:    False
+# Default:     "THE APP"
+# Env-var:     'APP_APP_NAME'
+# Description: The display name of the app
+# Example No. 1:
+#  >app_name: THAT APP
+# Example No. 2:
+#  >app_name: THIS APP
+app_name: THE APP
+
+# ## storage_dir ###
+# Type:        str
+# Required:    False
+# Env-var:     'APP_STORAGE_DIR'
+# Description: A directory to store files for the app.
+storage_dir: /home/tim/.config/myapp
+
+# ## admin_pw ###
+# Type:        str
+# Required:    True
+# Env-var:     'APP_ADMIN_PW'
+# Description: The init password for the admin account
+admin_pw: ''
+
+# ## database_server ###
+# Type:        Object (DatabaseServerSettings)
+# Required:    True
+# Env-var:     'APP_DATABASE_SERVER'
+# Description: The settings for the database server
+# Example:
+#  >database_server:
+#  >  host: db.company.org
+#  >  port: 1234
+#  >  database_names:
+#  >  - db1
+#  >  - db2
+database_server:
+
+  # ## host ###
+  # YAML-path:   database_server.host
+  # Type:        str
+  # Required:    False
+  # Default:     "localhost"
+  # Env-var:     'APP_DATABASE_SERVER__HOST'
+  # Description: The hostname the database will be available at
+  host: localhost
+
+  # ## port ###
+  # YAML-path:   database_server.port
+  # Type:        int
+  # Required:    False
+  # Default:     5678
+  # Env-var:     'APP_DATABASE_SERVER__PORT'
+  # Description: The port to connect to the database
+  port: 5678
+
+  # ## database_names ###
+  # YAML-path:   database_server.database_names
+  # Type:        List of str
+  # Required:    True
+  # Env-var:     'APP_DATABASE_SERVER__DATABASE_NAMES'
+  # Description: The names of the databases to use
+  # Example:
+  #  >database_names:
+  #  >- mydb
+  #  >- theotherdb
+  database_names: []
+
+# ## init_values ###
+# Type:     Dictionary of (str, str)
+# Required: True
+# Env-var:  'APP_INIT_VALUES'
+init_values: {}

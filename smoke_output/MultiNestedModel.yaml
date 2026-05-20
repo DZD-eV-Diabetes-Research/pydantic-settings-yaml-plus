@@ -1,0 +1,80 @@
+
+# ## servers ###
+# Type:     List of Object (ServerItem)
+# Required: False
+# Default:  [{"host": "a.example.com", "port": 80}, {"host": "b.example.com", "port": 80}]
+# Env-var:  'MULTI_SERVERS'
+servers:
+
+  # ## List[0] ###
+  # YAML-path: servers.[0]
+  # Type:      Object (ServerItem)
+  # Required:  False
+  # Env-var:   'MULTI_SERVERS__<list-index>'
+  -
+
+    # ## host ###
+    # YAML-path: servers.[0].host
+    # Type:      str
+    # Required:  True
+    # Env-var:   'MULTI_SERVERS__<list-index>__HOST'
+    host: a.example.com
+
+    # ## port ###
+    # YAML-path: servers.[0].port
+    # Type:      int
+    # Required:  False
+    # Default:   80
+    # Env-var:   'MULTI_SERVERS__<list-index>__PORT'
+    port: 80
+
+  # ## List[1] ###
+  # YAML-path: servers.[1]
+  # Type:      Object (ServerItem)
+  # Required:  False
+  # Env-var:   'MULTI_SERVERS__<list-index>'
+  -
+
+    # ## host ###
+    # YAML-path: servers.[1].host
+    # Type:      str
+    # Required:  True
+    # Env-var:   'MULTI_SERVERS__<list-index>__HOST'
+    host: b.example.com
+
+    # ## port ###
+    # YAML-path: servers.[1].port
+    # Type:      int
+    # Required:  False
+    # Default:   80
+    # Env-var:   'MULTI_SERVERS__<list-index>__PORT'
+    port: 80
+
+# ## server_map ###
+# Type:     Dictionary of (str, Object (ServerItem))
+# Required: False
+# Default:  {"primary": {"host": "primary.example.com", "port": 443}}
+# Env-var:  'MULTI_SERVER_MAP'
+server_map:
+
+  # ## primary ###
+  # YAML-path: server_map.['primary']
+  # Type:      Object (ServerItem)
+  # Required:  True
+  # Env-var:   'MULTI_SERVER_MAP__<dict-key>'
+  primary:
+
+    # ## host ###
+    # YAML-path: server_map.['primary'].host
+    # Type:      str
+    # Required:  True
+    # Env-var:   'MULTI_SERVER_MAP__<dict-key>__HOST'
+    host: primary.example.com
+
+    # ## port ###
+    # YAML-path: server_map.['primary'].port
+    # Type:      int
+    # Required:  False
+    # Default:   80
+    # Env-var:   'MULTI_SERVER_MAP__<dict-key>__PORT'
+    port: 443

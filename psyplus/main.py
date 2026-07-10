@@ -87,9 +87,20 @@ class YamlSettingsPlus:
     def load(self) -> BaseSettings:
         """Load the YAML file and return a validated settings instance.
 
-        Environment variables (respecting the model's ``env_prefix`` /
-        ``env_nested_delimiter``) take priority over YAML file values,
-        following standard pydantic-settings source precedence.
+        The YAML file is added as the *lowest*-priority pydantic-settings source, leaving
+        the standard sources above it untouched. Effective precedence, highest first:
+
+        1. init arguments
+        2. environment variables (respecting ``env_prefix`` / ``env_nested_delimiter``)
+        3. a dotenv file (``env_file``)
+        4. a secrets directory (``secrets_dir``) — Docker/Kubernetes secrets
+        5. the YAML file
+        6. model defaults
+
+        Sources 3 and 4 matter even though psyplus does not configure them itself: a model
+        that sets ``env_file`` or ``secrets_dir`` in its ``SettingsConfigDict`` expects them
+        to be honoured, and silently outranking a mounted secret with a committed YAML value
+        is the kind of thing nobody notices until it is a credential.
 
         Tip: if you want this behaviour without psyplus, configure
         ``yaml_file`` directly in your model's ``model_config``::
@@ -125,9 +136,15 @@ class YamlSettingsPlus:
                     dotenv_settings,
                     file_secret_settings,
                 ):
+                    # Pass every source through in pydantic-settings' own order and merely
+                    # append the YAML file beneath them. Dropping dotenv_settings or
+                    # file_secret_settings here would let a YAML value quietly win over an
+                    # `env_file` entry or a mounted `secrets_dir` secret.
                     return (
                         init_settings,
                         env_settings,
+                        dotenv_settings,
+                        file_secret_settings,
                         _YamlSource(settings_cls, yaml_file=yaml_path),
                     )
 

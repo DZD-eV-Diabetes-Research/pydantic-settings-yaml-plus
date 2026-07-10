@@ -375,13 +375,16 @@ For nested models the env var path is built as:
 
 ## Environment variable overrides
 
-`load()` creates a thin dynamic subclass that adds the YAML file as a pydantic-settings source while keeping the normal env var source with higher priority. The effective source priority (highest → lowest) is:
+`load()` creates a thin dynamic subclass that adds the YAML file as a pydantic-settings source, beneath all the standard ones. The effective source priority (highest → lowest) is:
 
-1. **Environment variables** (respects `env_prefix` / `env_nested_delimiter`)
-2. **YAML file** values
-3. **Model defaults**
+1. **Init arguments**
+2. **Environment variables** (respects `env_prefix` / `env_nested_delimiter`)
+3. **A dotenv file**, when your model sets `env_file`
+4. **A secrets directory**, when your model sets `secrets_dir` (Docker / Kubernetes secrets)
+5. **YAML file** values
+6. **Model defaults**
 
-No changes to your settings class are required.
+No changes to your settings class are required. Sources 3 and 4 are consulted only when your `SettingsConfigDict` configures them — but when it does they outrank the YAML file, so a secret mounted at `/run/secrets/...` is never silently overridden by a value committed to your config file.
 
 ---
 

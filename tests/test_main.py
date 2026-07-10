@@ -4,6 +4,7 @@ import os
 import pytest
 import yaml
 from pathlib import Path
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from psyplus import YamlSettingsPlus
 from tests.models.readme_example import MyAppConfig
@@ -212,6 +213,64 @@ class TestLoad:
         monkeypatch.setenv("SIMPLE_A_STRING", "from_env")
         config = YamlSettingsPlus(SimpleModel, path).load()
         assert config.a_string == "from_env"
+
+    @staticmethod
+    def _model_with(**config_kwargs):
+        """A settings model whose SettingsConfigDict is built per test (the paths are temporary)."""
+
+        class _Model(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="APP_", **config_kwargs)
+
+            api_key: str = "default"
+
+        return _Model
+
+    def test_secrets_dir_overrides_yaml(self, tmp_path):
+        """A mounted Docker/Kubernetes secret must outrank a committed YAML value."""
+        secrets_dir = tmp_path / "secrets"
+        secrets_dir.mkdir()
+        (secrets_dir / "app_api_key").write_text("from_secret")
+        path = tmp_path / "config.yaml"
+        self._write_yaml(path, {"api_key": "from_yaml"})
+
+        config = YamlSettingsPlus(self._model_with(secrets_dir=str(secrets_dir)), path).load()
+
+        assert config.api_key == "from_secret"
+
+    def test_dotenv_file_overrides_yaml(self, tmp_path):
+        env_file = tmp_path / "dotenv"
+        env_file.write_text("APP_API_KEY=from_dotenv\n")
+        path = tmp_path / "config.yaml"
+        self._write_yaml(path, {"api_key": "from_yaml"})
+
+        config = YamlSettingsPlus(self._model_with(env_file=str(env_file)), path).load()
+
+        assert config.api_key == "from_dotenv"
+
+    def test_env_var_outranks_dotenv_and_secrets(self, tmp_path, monkeypatch):
+        """The whole documented order, exercised at once."""
+        secrets_dir = tmp_path / "secrets"
+        secrets_dir.mkdir()
+        (secrets_dir / "app_api_key").write_text("from_secret")
+        env_file = tmp_path / "dotenv"
+        env_file.write_text("APP_API_KEY=from_dotenv\n")
+        path = tmp_path / "config.yaml"
+        self._write_yaml(path, {"api_key": "from_yaml"})
+        monkeypatch.setenv("APP_API_KEY", "from_env")
+
+        model = self._model_with(secrets_dir=str(secrets_dir), env_file=str(env_file))
+        config = YamlSettingsPlus(model, path).load()
+
+        assert config.api_key == "from_env"
+
+    def test_yaml_still_wins_over_defaults(self, tmp_path):
+        """The YAML file sits below the other sources, but still above model defaults."""
+        path = tmp_path / "config.yaml"
+        self._write_yaml(path, {"api_key": "from_yaml"})
+
+        config = YamlSettingsPlus(self._model_with(), path).load()
+
+        assert config.api_key == "from_yaml"
 
     def test_no_file_path_raises(self):
         with pytest.raises(ValueError, match="file_path"):

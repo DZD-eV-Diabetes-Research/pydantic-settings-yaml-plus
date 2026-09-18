@@ -52,7 +52,7 @@ This document is auto-generated from the pydantic-settings model. All settings c
 
 | Property | Value |
 |---|---|
-| Type | str |
+| Type | str or null |
 | Required | No |
 | Default | `null` |
 | Environment variable | `SIMPLE_OPTIONAL_NONE` |
@@ -121,11 +121,11 @@ A fully documented optional string field.
 
 | Property | Value |
 |---|---|
-| Type | str |
+| Type | str or null |
 | Required | No |
 | Default | `"default_value"` |
 | Constraints | MaxLen(max_length=100) |
-| Environment variable | `SIMPLE_FULLY_DOCUMENTED` |
+| Environment variable | `SIMPLE_FULLY_DOCUMENTED` (can not set null, use `null` in the YAML file) |
 
 **Examples:**
 

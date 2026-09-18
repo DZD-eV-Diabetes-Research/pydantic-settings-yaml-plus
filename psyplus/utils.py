@@ -63,6 +63,13 @@ def unwrap_optional(annotation: Any) -> Any:
     return annotation
 
 
+def is_nullable(annotation: Any) -> bool:
+    """True when the annotation accepts None at its top level, looking through Annotated."""
+    if get_origin(annotation) is Annotated:
+        return is_nullable(get_args(annotation)[0])
+    return is_optional(annotation)
+
+
 def clean_annotation(annotation: Any) -> Any:
     """Recursively unwrap Annotated and Optional/Union-with-None wrappers."""
     if get_origin(annotation) is Annotated:

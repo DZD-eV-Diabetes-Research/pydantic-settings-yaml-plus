@@ -1,17 +1,17 @@
 
 # ## log_level ###
-# Type:         Enum
+# Type:         Enum or null
 # Required:     False
 # Default:      "INFO"
 # Allowed vals: ['INFO', 'DEBUG']
-# Env-var:      'APP_LOG_LEVEL'
+# Env-var:      'APP_LOG_LEVEL' (can not set null, use null in the YAML file)
 log_level: INFO
 
 # ## app_name ###
-# Type:        str
+# Type:        str or null
 # Required:    False
 # Default:     "THE APP"
-# Env-var:     'APP_APP_NAME'
+# Env-var:     'APP_APP_NAME' (can not set null, use null in the YAML file)
 # Description: The display name of the app
 # Example No. 1:
 #  >app_name: THAT APP
@@ -20,9 +20,9 @@ log_level: INFO
 app_name: THE APP
 
 # ## storage_dir ###
-# Type:        str
+# Type:        str or null
 # Required:    False
-# Env-var:     'APP_STORAGE_DIR'
+# Env-var:     'APP_STORAGE_DIR' (can not set null, use null in the YAML file)
 # Description: A directory to store files for the app.
 storage_dir: /home/tim/.config/myapp
 
@@ -49,19 +49,19 @@ database_server:
 
   # ## host ###
   # YAML-path:   database_server.host
-  # Type:        str
+  # Type:        str or null
   # Required:    False
   # Default:     "localhost"
-  # Env-var:     'APP_DATABASE_SERVER__HOST'
+  # Env-var:     'APP_DATABASE_SERVER__HOST' (can not set null, use null in the YAML file)
   # Description: The hostname the database will be available at
   host: localhost
 
   # ## port ###
   # YAML-path:   database_server.port
-  # Type:        int
+  # Type:        int or null
   # Required:    False
   # Default:     5678
-  # Env-var:     'APP_DATABASE_SERVER__PORT'
+  # Env-var:     'APP_DATABASE_SERVER__PORT' (can not set null, use null in the YAML file)
   # Description: The port to connect to the database
   port: 5678
 

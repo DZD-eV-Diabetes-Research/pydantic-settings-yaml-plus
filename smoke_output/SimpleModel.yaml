@@ -28,7 +28,7 @@ a_float: 3.14
 a_bool: true
 
 # ## optional_none ###
-# Type:     str
+# Type:     str or null
 # Required: False
 # Default:  null
 # Env-var:  'SIMPLE_OPTIONAL_NONE'
@@ -90,11 +90,11 @@ required_string: ''
 required_list: []
 
 # ## fully_documented - Great String ###
-# Type:        str
+# Type:        str or null
 # Required:    False
 # Default:     "default_value"
 # Constraints: MaxLen(max_length=100)
-# Env-var:     'SIMPLE_FULLY_DOCUMENTED'
+# Env-var:     'SIMPLE_FULLY_DOCUMENTED' (can not set null, use null in the YAML file)
 # Description: A fully documented optional string field.
 # Example No. 1:
 #  >fully_documented: ex1

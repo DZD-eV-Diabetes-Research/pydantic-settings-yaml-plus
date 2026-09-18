@@ -16,6 +16,7 @@ from psyplus.utils import (
     get_literal_list,
     get_str_dict_as_table,
     has_literal,
+    is_nullable,
     nested_pydantic_to_dict,
     python_annotation_to_readable,
 )
@@ -86,7 +87,27 @@ class FieldInfoContainer:
         return ".".join(str(p) for p in self.path)
 
     def get_type_string(self) -> str | None:
-        return python_annotation_to_readable(self.get_annotation())
+        type_str = python_annotation_to_readable(self.get_annotation())
+        if type_str and is_nullable(self.get_annotation()):
+            type_str += " or null"
+        return type_str
+
+    def needs_env_var_null_note(self) -> bool:
+        """True for a nullable field whose default is not null.
+
+        Only there does a user have a reason to set null through the env var, and
+        pydantic-settings can not do that unless the model sets
+        ``env_parse_none_str``: without it an int or bool field fails validation,
+        a str field gets the literal text, and a list, dict or model field silently
+        keeps its default.
+        """
+        if self.field_info is None or self.field_info.default is None:
+            return False
+        return is_nullable(self.get_annotation())
+
+    def get_env_parse_none_str(self) -> str | None:
+        """The env var value that means null (``env_parse_none_str``), if the model sets one."""
+        return self.root_settings_class.model_config.get("env_parse_none_str")
 
     def get_enum_vals(self) -> list[Any] | None:
         if has_literal(self.get_annotation()):
@@ -142,6 +163,12 @@ class FieldInfoContainer:
         env_var = self.get_env_var()
         if env_var:
             data["Env-var:"] = f"'{env_var}'"
+            if self.needs_env_var_null_note():
+                none_str = self.get_env_parse_none_str()
+                if none_str is not None:
+                    data["Env-var:"] += f" ('{none_str}' sets null)"
+                else:
+                    data["Env-var:"] += " (can not set null, use null in the YAML file)"
 
         if fi.description:
             data["Description:"] = fi.description

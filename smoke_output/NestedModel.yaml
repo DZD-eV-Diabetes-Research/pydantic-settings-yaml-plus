@@ -57,7 +57,7 @@ database:
   tags: []
 
 # ## cache ###
-# Type:     Object (CacheConfig)
+# Type:     Object (CacheConfig) or null
 # Required: False
 # Default:  null
 # Env-var:  'APP_CACHE'

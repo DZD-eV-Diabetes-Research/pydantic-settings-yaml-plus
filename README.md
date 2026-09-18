@@ -125,18 +125,18 @@ The command above creates `config.yaml` with a comment block above every key:
 
 ```yaml
 # ## log_level ###
-# Type:         Enum
+# Type:         Enum or null
 # Required:     False
 # Default:      "INFO"
 # Allowed vals: ['INFO', 'DEBUG']
-# Env-var:      'APP_LOG_LEVEL'
+# Env-var:      'APP_LOG_LEVEL' (can not set null, use null in the YAML file)
 log_level: INFO
 
 # ## app_name ###
-# Type:        str
+# Type:        str or null
 # Required:    False
 # Default:     "THE APP"
-# Env-var:     'APP_APP_NAME'
+# Env-var:     'APP_APP_NAME' (can not set null, use null in the YAML file)
 # Description: The display name of the app
 # Example No. 1:
 #  >app_name: THAT APP
@@ -145,9 +145,9 @@ log_level: INFO
 app_name: THE APP
 
 # ## storage_dir ###
-# Type:        str
+# Type:        str or null
 # Required:    False
-# Env-var:     'APP_STORAGE_DIR'
+# Env-var:     'APP_STORAGE_DIR' (can not set null, use null in the YAML file)
 # Description: A directory to store files for the app.
 storage_dir: /home/user/.config/myapp
 
@@ -174,19 +174,19 @@ database_server:
 
   # ## host ###
   # YAML-path:   database_server.host
-  # Type:        str
+  # Type:        str or null
   # Required:    False
   # Default:     "localhost"
-  # Env-var:     'APP_DATABASE_SERVER__HOST'
+  # Env-var:     'APP_DATABASE_SERVER__HOST' (can not set null, use null in the YAML file)
   # Description: The hostname the database will be available at
   host: localhost
 
   # ## port ###
   # YAML-path:   database_server.port
-  # Type:        int
+  # Type:        int or null
   # Required:    False
   # Default:     5678
-  # Env-var:     'APP_DATABASE_SERVER__PORT'
+  # Env-var:     'APP_DATABASE_SERVER__PORT' (can not set null, use null in the YAML file)
   # Description: The port to connect to the database
   port: 5678
 
@@ -370,6 +370,28 @@ For nested models the env var path is built as:
 {env_prefix}{parent_key}{env_nested_delimiter}{child_key}
 # e.g. MYAPP_DATABASE__HOST  (prefix="MYAPP_", delimiter="__")
 ```
+
+#### Nullable fields
+
+A nullable field (`Optional[int]`, `int | None`) shows its type as `int or null`. By default,
+pydantic-settings can not set such a field to null through an env var: an `int` or `bool` field
+fails validation, a `str` field gets the literal text `null`, and a list, dict or model field
+silently keeps its default. Only the YAML file can set null then. Set `env_parse_none_str` to name
+the env var value that means null:
+
+```python
+class MyConfig(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="MYAPP_", env_parse_none_str="null")
+
+    max_age_days: Optional[int] = 30
+    # → Type:    int or null
+    # → Env-var: 'MYAPP_MAX_AGE_DAYS' ('null' sets null)
+```
+
+For a nullable field whose default is not null, the `Env-var:` hint says which case applies:
+`('null' sets null)` with `env_parse_none_str`, or `(can not set null, use null in the YAML file)`
+without it. A field that defaults to null gets no hint, since leaving the env var unset already
+gives null.
 
 ---
 

@@ -8,11 +8,11 @@ This document is auto-generated from the pydantic-settings model. All settings c
 
 | Property | Value |
 |---|---|
-| Type | Enum |
+| Type | Enum or null |
 | Required | No |
 | Default | `"INFO"` |
 | Allowed values | `INFO` · `DEBUG` |
-| Environment variable | `APP_LOG_LEVEL` |
+| Environment variable | `APP_LOG_LEVEL` (can not set null, use `null` in the YAML file) |
 
 ---
 
@@ -22,10 +22,10 @@ The display name of the app
 
 | Property | Value |
 |---|---|
-| Type | str |
+| Type | str or null |
 | Required | No |
 | Default | `"THE APP"` |
-| Environment variable | `APP_APP_NAME` |
+| Environment variable | `APP_APP_NAME` (can not set null, use `null` in the YAML file) |
 
 **Examples:**
 
@@ -49,9 +49,9 @@ A directory to store files for the app.
 
 | Property | Value |
 |---|---|
-| Type | str |
+| Type | str or null |
 | Required | No |
-| Environment variable | `APP_STORAGE_DIR` |
+| Environment variable | `APP_STORAGE_DIR` (can not set null, use `null` in the YAML file) |
 
 ---
 
@@ -96,10 +96,10 @@ The hostname the database will be available at
 
 | Property | Value |
 |---|---|
-| Type | str |
+| Type | str or null |
 | Required | No |
 | Default | `"localhost"` |
-| Environment variable | `APP_DATABASE_SERVER__HOST` |
+| Environment variable | `APP_DATABASE_SERVER__HOST` (can not set null, use `null` in the YAML file) |
 
 ---
 
@@ -109,10 +109,10 @@ The port to connect to the database
 
 | Property | Value |
 |---|---|
-| Type | int |
+| Type | int or null |
 | Required | No |
 | Default | `5678` |
-| Environment variable | `APP_DATABASE_SERVER__PORT` |
+| Environment variable | `APP_DATABASE_SERVER__PORT` (can not set null, use `null` in the YAML file) |
 
 ---
 

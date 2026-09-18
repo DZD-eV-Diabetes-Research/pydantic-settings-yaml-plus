@@ -161,7 +161,14 @@ class MarkdownDocGenerator:
 
         env_var = container.get_env_var()
         if env_var:
-            rows.append(("Environment variable", f"`{env_var}`"))
+            env_cell = f"`{env_var}`"
+            if container.needs_env_var_null_note():
+                none_str = container.get_env_parse_none_str()
+                if none_str is not None:
+                    env_cell += f" (`{none_str}` sets null)"
+                else:
+                    env_cell += " (can not set null, use `null` in the YAML file)"
+            rows.append(("Environment variable", env_cell))
 
         if rows:
             lines.append("| Property | Value |")

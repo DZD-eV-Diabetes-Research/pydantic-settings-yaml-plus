@@ -94,7 +94,7 @@ Database name (required)
 
 | Property | Value |
 |---|---|
-| Type | Object (CacheConfig) |
+| Type | Object (CacheConfig) or null |
 | Required | No |
 | Default | `null` |
 | Environment variable | `APP_CACHE` |

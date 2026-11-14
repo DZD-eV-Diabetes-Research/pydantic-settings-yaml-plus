@@ -266,8 +266,8 @@ def _table_rows(doc: str, path: str) -> list[str]:
 class TestMarkdownUnionOfModels:
     def test_each_alternative_has_its_own_section(self):
         doc = _generate(_Pets)
-        assert "### `pet` — `_Cat` schema (option 1 of 2)" in doc
-        assert "### `pet` — `_Dog` schema (option 2 of 2)" in doc
+        assert "### `pet`: `_Cat` schema (option 1 of 2)" in doc
+        assert "### `pet`: `_Dog` schema (option 2 of 2)" in doc
 
     def test_fields_of_every_alternative_are_documented(self):
         doc = _generate(_Pets)
@@ -287,7 +287,7 @@ class TestMarkdownUnionOfModels:
 
     def test_list_and_dict_of_union_are_expanded(self):
         doc = _generate(_Pets)
-        assert "`pets[*]` — `_Dog` schema (option 2 of 2)" in doc
+        assert "`pets[*]`: `_Dog` schema (option 2 of 2)" in doc
         assert "`pets[*].bark`" in doc
         assert "`pet_map[*].bark`" in doc
         assert "`PETS_PET_MAP__<dict-key>__BARK`" in doc

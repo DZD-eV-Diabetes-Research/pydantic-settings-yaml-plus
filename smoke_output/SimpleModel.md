@@ -1,4 +1,4 @@
-# Configuration Reference — `SimpleModel`
+# Configuration Reference: `SimpleModel`
 
 This document is auto-generated from the pydantic-settings model. All settings can be provided via the YAML config file or overridden with environment variables.
 

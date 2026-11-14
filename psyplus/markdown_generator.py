@@ -40,7 +40,7 @@ class MarkdownDocGenerator:
         """Return the full markdown document as a string."""
         lines: list[str] = []
         name = self.settings_class.__name__
-        lines.append(f"# Configuration Reference — `{name}`\n")
+        lines.append(f"# Configuration Reference: `{name}`\n")
         lines.append(
             "This document is auto-generated from the pydantic-settings model. "
             "All settings can be provided via the YAML config file or overridden with environment variables.\n"
@@ -134,7 +134,7 @@ class MarkdownDocGenerator:
         suffix: str = "",
     ) -> list[str]:
         """A heading that introduces the fields of a list/dict item or Union alternative."""
-        text = f"{md_code(path_to_str(item_path))} — {md_code(nested_cls.__name__)} schema"
+        text = f"{md_code(path_to_str(item_path))}: {md_code(nested_cls.__name__)} schema"
         if suffix:
             text += f" {suffix}"
         return [md_heading(heading_level, text) + "\n", "---\n"]

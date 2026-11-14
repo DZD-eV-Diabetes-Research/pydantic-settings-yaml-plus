@@ -1,4 +1,4 @@
-# Configuration Reference — `MultiNestedModel`
+# Configuration Reference: `MultiNestedModel`
 
 This document is auto-generated from the pydantic-settings model. All settings can be provided via the YAML config file or overridden with environment variables.
 
@@ -15,7 +15,7 @@ This document is auto-generated from the pydantic-settings model. All settings c
 
 ---
 
-### `servers[*]` — `ServerItem` schema
+### `servers[*]`: `ServerItem` schema
 
 ---
 
@@ -49,7 +49,7 @@ This document is auto-generated from the pydantic-settings model. All settings c
 
 ---
 
-### `server_map[*]` — `ServerItem` schema
+### `server_map[*]`: `ServerItem` schema
 
 ---
 

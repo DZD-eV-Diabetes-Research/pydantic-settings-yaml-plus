@@ -40,6 +40,8 @@ MODELS = [
     cases.Camel,
     cases.CamelPrefixAll,
     cases.CamelCaseSens,
+    cases.UnionAliases,
+    cases.UnionAliasesByName,
     NestedModel,
     MultiNestedModel,
     MyAppConfig,

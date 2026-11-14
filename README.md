@@ -466,10 +466,11 @@ class MyConfig(BaseSettings):
   `database` has no alias.
 * **Case:** without `case_sensitive=True` env var names arrive in lower case, and
   pydantic-settings matches them back to a camelCase key only along plain sub-model fields. Below a
-  dict, or below an `Optional` sub-model deeper down, a key with upper case letters can not be set
-  through its own env var, so none is shown there. The JSON value of the field above still works.
-* **`populate_by_name`:** below a top-level field with an alias, the fields have no env var of
-  their own. pydantic-settings files them under the field name, which clashes with the alias key
+  dict, a Union of models, or an `Optional` sub-model deeper down, a key with upper case letters can
+  not be set through its own env var, so none is shown there. The JSON value of the field above
+  still works.
+* **`populate_by_name`:** below a top-level field with an alias, the fields and dict entries have
+  no env var of their own. pydantic-settings files them under the field name, which clashes with the alias key
   from the YAML file. The JSON value of the top-level field still works.
 * **`AliasPath`:** a path of names is written as nested maps, which several fields may share. A
   path with a list index (`AliasPath("servers", 0)`) or one that clashes with another key is not
@@ -478,8 +479,8 @@ class MyConfig(BaseSettings):
 * **Alias and validation alias differ:** pydantic-settings reads a top-level field from the YAML
   file only under its `alias`. When validation expects another name (`alias="a",
   validation_alias="b"`, an `alias_generator` next to an explicit `validation_alias`, or
-  `validate_by_alias=False`), no key works, so the field is left out of the YAML file with a note.
-  Set it through its env var instead.
+  `validate_by_alias=False`), no key works, so the field is left out of the YAML file. A note in
+  the YAML file and in the Markdown doc says so. Set it through its env var instead.
 
 ---
 

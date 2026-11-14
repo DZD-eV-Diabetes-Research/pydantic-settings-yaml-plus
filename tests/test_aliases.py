@@ -488,3 +488,61 @@ class TestMarkdown:
         assert f"| Default | `{default}` |" in md
         assert f"# Default:  {default}" in rendered
         assert yaml.safe_load(rendered) == {"leaf_model": {"innerValue": "d"}}
+
+
+# ---------------------------------------------------------------------------
+# Union of models and dict entries
+# ---------------------------------------------------------------------------
+
+class TestUnionAndDict:
+    def test_union_option_sections_use_the_aliases(self):
+        md = YamlSettingsPlus(cases.UnionAliases).render_markdown()
+        for heading in (
+            "## `theBackend`",
+            "### `theBackend`: `AliasCache` schema (option 1 of 2)",
+            "#### `theBackend.hostName`",
+            "#### `theBackend.cache_port`",
+            "### `theBackend`: `AliasOther` schema (option 2 of 2)",
+            "#### `theBackend.the_url`",
+            "### `optU`: `AliasOther` schema (option 2 of 2)",
+        ):
+            assert f"\n{heading}\n" in md, heading
+        names = md_env_names(cases.UnionAliases)
+        assert names["theBackend.cache_port"] == "THEBACKEND__CACHE_PORT"
+        assert names["theBackend.the_url"] == "THEBACKEND__THE_URL"
+        assert names["optU.cache_port"] == "OPTU__CACHE_PORT"
+        # Below a Union pydantic-settings does not restore the case of a key.
+        assert "theBackend.hostName" not in names
+        assert "optU.hostName" not in names
+
+    def test_null_union_lists_the_sub_field_env_vars_by_alias(self, tmp_path):
+        rendered = YamlSettingsPlus(cases.UnionAliases).render_yaml()
+        assert "#   optU.cache_port: 'OPTU__CACHE_PORT'\n" in rendered
+        assert "#   optU.the_url: 'OPTU__THE_URL'\n" in rendered
+        assert "optU.hostName" not in rendered
+        template = yaml.safe_load(rendered)
+        loaded = _load(cases.UnionAliases, template, tmp_path, {"OPTU__THE_URL": "x"})
+        assert loaded.opt.url == "x"
+
+    def test_populate_by_name_lists_no_sub_field_env_vars_below_an_alias(self):
+        rendered = YamlSettingsPlus(cases.UnionAliasesByName).render_yaml()
+        assert "Env-vars of the sub-fields:" not in rendered
+        assert "# Env-var:  'OPTU'" in rendered
+
+    def test_dict_entry_note_uses_the_alias(self):
+        rendered = YamlSettingsPlus(cases.UnionAliases).render_yaml()
+        assert (
+            "#           'THELABELS__<dict-key>' sets one entry, its key arrives in lower case"
+            in rendered
+        )
+        md = YamlSettingsPlus(cases.UnionAliases).render_markdown()
+        assert "| `THELABELS` (`THELABELS__<dict-key>` sets one entry" in md
+
+    def test_dict_entry_note_follows_the_alias_env_rules(self):
+        # With populate_by_name an entry env var below an aliased dict field breaks
+        # load(), so there is no note for it. The field without an alias keeps its note.
+        rendered = YamlSettingsPlus(cases.UnionAliasesByName).render_yaml()
+        assert "THELABELS__<dict-key>" not in rendered
+        assert "'APP_PLAIN_LABELS__<dict-key>' sets one entry" in rendered
+        md = YamlSettingsPlus(cases.UnionAliasesByName).render_markdown()
+        assert "THELABELS__<dict-key>" not in md

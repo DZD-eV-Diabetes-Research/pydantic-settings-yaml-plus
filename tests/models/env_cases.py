@@ -175,3 +175,25 @@ class CamelPrefixAll(Camel):
 
 class CamelCaseSens(Camel):
     model_config = SettingsConfigDict(case_sensitive=True)
+
+
+# --- aliases on a Union of models and on a dict ----------------------------
+class AliasCache(BaseModel):
+    host_name: str = Field("h", alias="hostName")
+    port: int = Field(1, alias="cache_port")
+
+
+class AliasOther(BaseModel):
+    url: str = Field("u", alias="the_url")
+
+
+class UnionAliases(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="APP_", env_nested_delimiter="__")
+    backend: Union[AliasCache, AliasOther] = Field(AliasCache(), alias="theBackend")
+    opt: Optional[Union[AliasCache, AliasOther]] = Field(None, alias="optU")
+    labels: Dict[str, str] = Field({"a": "b"}, alias="theLabels")
+    plain_labels: Dict[str, str] = {"a": "b"}
+
+
+class UnionAliasesByName(UnionAliases):
+    model_config = SettingsConfigDict(populate_by_name=True)

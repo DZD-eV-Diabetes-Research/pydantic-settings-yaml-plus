@@ -433,6 +433,55 @@ For a nullable field whose default is not null, the `Env-var:` hint says which c
 without it. A field that defaults to null gets no hint, since leaving the env var unset already
 gives null.
 
+### Fields with an alias
+
+pydantic-settings reads the YAML file and the env vars by a field's validation alias, so psyplus
+uses it as the YAML key, in the YAML path and in the env var name. That covers `alias=`,
+`validation_alias=` and an `alias_generator` such as `to_camel`, also with `populate_by_name=True`.
+A `serialization_alias` changes nothing.
+
+```python
+class Database(BaseModel):
+    host_name: str = Field("localhost", alias="hostName")
+
+class MyConfig(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="MYAPP_", env_nested_delimiter="__")
+
+    log_level: str = Field("INFO", alias="logLevel")
+    # → YAML key: logLevel, Env-var: 'LOGLEVEL'
+    database: Database = Database()
+    # → YAML path: database.hostName, Env-var: 'MYAPP_DATABASE__HOSTNAME'
+```
+
+| Field | YAML key | Env var |
+|---|---|---|
+| `alias="logLevel"` or `validation_alias="logLevel"` | `logLevel` | `LOGLEVEL` |
+| `validation_alias=AliasChoices("a", "b")` | `a`, the first string choice | `A` |
+| `validation_alias=AliasPath("database", "host")` | `host` inside a `database` map | none |
+| `serialization_alias="x"` only | the field name | as without an alias |
+
+* **Prefix:** pydantic-settings puts `env_prefix` in front of an alias only when the model sets
+  `env_prefix_target="alias"` or `"all"`. With the default `"variable"` only field names get it.
+  What counts is the top-level field: `MYAPP_DATABASE__HOSTNAME` above gets the prefix because
+  `database` has no alias.
+* **Case:** without `case_sensitive=True` env var names arrive in lower case, and
+  pydantic-settings matches them back to a camelCase key only along plain sub-model fields. Below a
+  dict, a Union of models, or an `Optional` sub-model deeper down, a key with upper case letters can
+  not be set through its own env var, so none is shown there. The JSON value of the field above
+  still works.
+* **`populate_by_name`:** below a top-level field with an alias, the fields and dict entries have
+  no env var of their own. pydantic-settings files them under the field name, which clashes with the alias key
+  from the YAML file. The JSON value of the top-level field still works.
+* **`AliasPath`:** a path of names is written as nested maps, which several fields may share. A
+  path with a list index (`AliasPath("servers", 0)`) or one that clashes with another key is not
+  written; its comment block says where to add it. No env var sets an `AliasPath` field:
+  pydantic-settings would read each element of the path as an env var of its own.
+* **Alias and validation alias differ:** pydantic-settings reads a top-level field from the YAML
+  file only under its `alias`. When validation expects another name (`alias="a",
+  validation_alias="b"`, an `alias_generator` next to an explicit `validation_alias`, or
+  `validate_by_alias=False`), no key works, so the field is left out of the YAML file. A note in
+  the YAML file and in the Markdown doc says so. Set it through its env var instead.
+
 ---
 
 ## Environment variable overrides

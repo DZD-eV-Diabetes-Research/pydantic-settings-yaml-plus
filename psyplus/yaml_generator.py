@@ -13,7 +13,16 @@ from pydantic_settings import BaseSettings
 from ruamel.yaml import YAML, CommentedMap, CommentedSeq
 from ruamel.yaml.scalarstring import SingleQuotedScalarString
 
-from psyplus.field_info import DictKey, FieldInfoContainer, ListIndex, path_to_str, yaml_key
+from psyplus.field_info import (
+    DictKey,
+    FieldInfoContainer,
+    FieldKey,
+    ListIndex,
+    key_name,
+    path_to_str,
+    yaml_key_path,
+    yaml_source_alias,
+)
 from psyplus.utils import clean_annotation, sequence_item_annotation
 
 log = logging.getLogger(__name__)
@@ -43,6 +52,14 @@ _MISSING = object()
 _UNRESOLVED_NOTE = (
     "Note: the default is computed from other values when the settings load. "
     "Remove this key to use it."
+)
+_ALIAS_PATH_NOTE = (
+    "Note: this field is read from the AliasPath {path}, which is not written to this "
+    "file. Add it by hand to set the value."
+)
+_UNREADABLE_NOTE = (
+    "Note: this field is not written to this file. pydantic-settings reads it from the "
+    "YAML file under its alias {alias}, but validation expects {key}, so no key works here."
 )
 
 
@@ -113,41 +130,125 @@ class YamlFileGenerator:
         A field's value comes from *instance* (a default sub-model or a list or dict
         item) when given, otherwise from the field's default.
         """
-        level = len(parent_path)
         result = CommentedMap()
         # The values so far, passed to default factories that take the validated data.
         data: dict[str, Any] = {}
+        key_paths = {name: yaml_key_path(cls, name, fi) for name, fi in cls.model_fields.items()}
+        # Keys of fields that sit directly in this map, an AliasPath must not reuse them.
+        plain_keys = {kp[0] for kp in key_paths.values() if len(kp) == 1}
+        # The maps created for AliasPath segments, which other AliasPath fields share.
+        alias_path_maps: list[CommentedMap] = []
+        # (map, key, comment lines, indent) of each written key, applied at the end.
+        comments: list[tuple[CommentedMap, Any, list[str], int]] = []
+        # Comment lines of fields that are not written, they go above the next key.
+        pending: list[str] = []
+
+        def add_comment(target: CommentedMap, key: Any, lines: list[str], depth: int) -> None:
+            nonlocal pending
+            comments.append((target, key, pending + lines, depth * self.indent_size))
+            pending = []
 
         for name, fi in cls.model_fields.items():
-            key = yaml_key(name, fi)
-            path = parent_path + [key]
+            key_path = key_paths[name]
+            path = parent_path + key_path
             value = self._field_value(name, fi, instance, data, path)
-
-            sub_cls = _model_class(fi.annotation) if value is _REQUIRED else None
-            if sub_cls is not None and sub_cls not in self._walking:
-                result[key] = self._walk_class(sub_cls, path)
-            elif value is _REQUIRED or value is _UNRESOLVED:
-                result[key] = None
-            else:
+            if value is not _REQUIRED and value is not _UNRESOLVED:
                 data[name] = value
-                result[key] = self._encode_value(value, fi.annotation, path)
 
-            comment_lines = FieldInfoContainer(
+            container = FieldInfoContainer(
                 path=path,
-                field_name=key,
+                field_name=key_name(key_path),
                 field_info=fi,
                 root_settings_class=self.settings_class,
-            ).build_comment_lines(list_sub_field_env_vars=result[key] is None)
+            )
+            note = None
+            source_alias = yaml_source_alias(self.settings_class, cls, fi, key_path)
+            if source_alias is not None:
+                note = _UNREADABLE_NOTE.format(alias=source_alias, key=key_path[0])
+            target = None
+            if note is None:
+                target = self._target_map(
+                    result, parent_path, key_path, plain_keys, alias_path_maps, add_comment
+                )
+                if target is None:
+                    note = _ALIAS_PATH_NOTE.format(path=path_to_str(path))
+            if target is None:
+                log.warning(
+                    f"`{path_to_str(path)}` (field `{name}` of `{cls.__name__}`) is left "
+                    f"out of the YAML file. {note}"
+                )
+                pending.extend(container.build_comment_lines())
+                pending.extend([note, ""])
+                continue
+
+            # A plain str: ruamel can not write the FieldKey subclass.
+            key = str(key_path[-1])
+            sub_cls = _model_class(fi.annotation) if value is _REQUIRED else None
+            if sub_cls is not None and sub_cls not in self._walking:
+                target[key] = self._walk_class(sub_cls, path)
+            elif value is _REQUIRED or value is _UNRESOLVED:
+                target[key] = None
+            else:
+                target[key] = self._encode_value(value, fi.annotation, path)
+
+            comment_lines = container.build_comment_lines(
+                list_sub_field_env_vars=target[key] is None
+            )
             if value is _UNRESOLVED:
                 comment_lines.append(_UNRESOLVED_NOTE)
+            add_comment(target, key, comment_lines, len(path) - 1)
 
-            result.yaml_set_comment_before_after_key(
-                key=key,
-                before="\n" + "\n".join(comment_lines),
-                indent=level * self.indent_size,
+        if pending:
+            if comments:
+                # No written key follows, put them above the last one.
+                target, key, lines, indent = comments[-1]
+                comments[-1] = (target, key, pending + lines, indent)
+            else:
+                log.warning(
+                    f"`{cls.__name__}` has no field that can be written to the YAML file."
+                )
+        for target, key, lines, indent in comments:
+            target.yaml_set_comment_before_after_key(
+                key=key, before="\n" + "\n".join(lines), indent=indent
             )
 
         return result
+
+    @staticmethod
+    def _target_map(
+        result: CommentedMap,
+        parent_path: list[str | ListIndex | DictKey],
+        key_path: list[FieldKey | ListIndex],
+        plain_keys: set[str],
+        alias_path_maps: list[CommentedMap],
+        add_comment: Any,
+    ) -> CommentedMap | None:
+        """The map a field's last key goes into: *result*, or nested maps for an AliasPath.
+
+        The nested maps of an AliasPath are shared with other AliasPath fields of the
+        model. None when the AliasPath can not be written: it has a list index, or it
+        clashes with the key of another field.
+        """
+        if len(key_path) == 1:
+            return result
+        if any(isinstance(segment, ListIndex) for segment in key_path) or key_path[0] in plain_keys:
+            return None
+        target = result
+        for depth, segment in enumerate(map(str, key_path[:-1])):
+            if segment not in target:
+                target[segment] = CommentedMap()
+                alias_path_maps.append(target[segment])
+                path = parent_path + key_path[: depth + 1]
+                lines = [f"## {segment} ###"]
+                if len(path) > 1:
+                    lines.append(f"YAML-path: {path_to_str(path)}")
+                add_comment(target, segment, lines, len(path) - 1)
+            elif not any(target[segment] is m for m in alias_path_maps):
+                return None
+            target = target[segment]
+        if key_path[-1] in target:
+            return None
+        return target
 
     def _walk_class(
         self,

@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, get_origin
+from typing import Any, get_args, get_origin
 
+from pydantic import AliasChoices, AliasPath, BaseModel
 from pydantic import fields as pydantic_fields
 from pydantic_core import PydanticUndefined
 from pydantic_settings import BaseSettings
@@ -15,6 +16,7 @@ from psyplus.utils import (
     get_str_dict_as_table,
     has_literal,
     is_nullable,
+    is_optional,
     model_members,
     python_annotation_to_readable,
     readable_constraints,
@@ -49,13 +51,160 @@ class DictKey:
         return f"['{self.key}']"
 
 
-def yaml_key(field_name: str, field_info: pydantic_fields.FieldInfo) -> str:
-    """The key of a model field in the YAML file.
+class FieldKey(str):
+    """A path segment that names a model field: its key in the YAML file.
+
+    It remembers the field and where the key comes from, because the env var name
+    depends on it (see ``FieldInfoContainer.get_env_var``).
+    """
+
+    field_info: pydantic_fields.FieldInfo | None
+    # The key is the field's validation alias, not its name.
+    is_alias: bool
+    # The key is a segment of an ``AliasPath``.
+    in_alias_path: bool
+
+    def __new__(
+        cls,
+        key: str,
+        field_info: pydantic_fields.FieldInfo | None = None,
+        is_alias: bool = False,
+        in_alias_path: bool = False,
+    ) -> FieldKey:
+        obj = super().__new__(cls, key)
+        obj.field_info = field_info
+        obj.is_alias = is_alias
+        obj.in_alias_path = in_alias_path
+        return obj
+
+
+def yaml_key_path(
+    model_cls: type[BaseModel] | None,
+    field_name: str,
+    field_info: pydantic_fields.FieldInfo,
+) -> list[FieldKey | ListIndex]:
+    """Where the value of a model field sits in the YAML file, relative to its model.
 
     The single place that decides it: the YAML generator, the Markdown generator and
-    the env var names all build their paths from this key.
+    the env var names all build their paths from it.
+
+    * No alias: ``[field_name]``.
+    * A validation alias (``alias=``, ``validation_alias=``, an ``alias_generator``)
+      is the key, since the YAML file is validated by alias. Of ``AliasChoices`` the
+      first plain string choice. This holds with ``populate_by_name`` as well.
+    * An ``AliasPath`` (or ``AliasChoices`` of ``AliasPath`` entries only): its
+      segments, so the value sits in nested maps (``outer.inner``) or in a list
+      element (``items[1]``).
+
+    Only a model with ``validate_by_alias=False`` keeps the field name.
     """
-    return field_name
+    alias: Any = field_info.validation_alias
+    if model_cls is not None and model_cls.model_config.get("validate_by_alias") is False:
+        alias = None
+    if isinstance(alias, AliasChoices):
+        choices = [c for c in alias.choices if isinstance(c, str)]
+        alias = choices[0] if choices else alias.choices[0]
+    if alias is None:
+        return [FieldKey(field_name, field_info)]
+    if isinstance(alias, AliasPath):
+        return [
+            FieldKey(segment, field_info, is_alias=True, in_alias_path=True)
+            if isinstance(segment, str)
+            else ListIndex(index=segment)
+            for segment in alias.path
+        ]
+    return [FieldKey(alias, field_info, is_alias=True)]
+
+
+def yaml_source_alias(
+    root_settings_class: type[BaseModel],
+    model_cls: type[BaseModel],
+    field_info: pydantic_fields.FieldInfo,
+    key_path: list[FieldKey | ListIndex],
+) -> str | None:
+    """The alias under which the YAML source files a field that validation rejects there.
+
+    pydantic-settings' YAML source files each top-level value under the field's
+    ``alias``. When validation reads another name (a different ``validation_alias``,
+    an ``alias_generator`` next to an explicit ``validation_alias``, or
+    ``validate_by_alias=False``), the field can not be set from the YAML file under
+    any key. None when the field reads fine.
+    """
+    if model_cls is not root_settings_class or not isinstance(field_info.alias, str):
+        return None
+    if field_info.alias == key_path[0]:
+        return None
+    return field_info.alias
+
+
+def yaml_keyed(value: Any) -> Any:
+    """*value* with every model in it turned into a dict under its YAML keys.
+
+    pydantic would dump a model under its serialization aliases, which are not the
+    keys of the YAML file. Fields read from an AliasPath with a list index are left
+    out, as in the YAML file.
+    """
+    if isinstance(value, BaseModel):
+        out: dict[str, Any] = {}
+        for name, fi in type(value).model_fields.items():
+            key_path = yaml_key_path(type(value), name, fi)
+            if any(isinstance(segment, ListIndex) for segment in key_path):
+                continue
+            target: Any = out
+            for segment in key_path[:-1]:
+                if not isinstance(target, dict):
+                    break
+                target = target.setdefault(str(segment), {})
+            if isinstance(target, dict):
+                target[str(key_path[-1])] = yaml_keyed(getattr(value, name, None))
+        return out
+    if isinstance(value, dict):
+        return {k: yaml_keyed(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [yaml_keyed(v) for v in value]
+    return value
+
+
+def key_name(key_path: list[FieldKey | ListIndex]) -> str:
+    """The name to show for a field in a comment header: its key, or its whole ``AliasPath``."""
+    last = key_path[-1]
+    return str(last) if isinstance(last, str) else path_to_str(list(key_path))
+
+
+def _restores_key_case(field_info: pydantic_fields.FieldInfo, top_level: bool) -> bool:
+    """Whether pydantic-settings restores the case of the env var keys below this field.
+
+    Mirrors ``PydanticBaseEnvSettingsSource._replace_field_names_case_insensitively``:
+    it enters a top-level field that is a model or ``Optional[Model]`` (it takes the
+    first member of a two member union with None), below that only plain model fields.
+    """
+    annotation = field_info.annotation
+    if top_level and is_optional(annotation):
+        args = get_args(annotation)
+        if len(args) == 2:
+            annotation = args[0]
+    return isinstance(annotation, type) and issubclass(annotation, BaseModel)
+
+
+def _env_keys_match_case_insensitively(path: list[str | ListIndex | DictKey]) -> bool:
+    """Whether a case-insensitive env var reaches the value at *path*.
+
+    Without ``case_sensitive`` the env var name arrives in lower case and
+    pydantic-settings maps each key back to its field (``subalias`` -> ``subAlias``),
+    but only along plain sub-model fields. Below a dict or an ``Optional`` sub-model
+    deeper down, a key with upper case letters (a camelCase alias, for example) stays
+    lower case, matches no field and the value is silently dropped.
+    """
+    restoring = True
+    for i, segment in enumerate(path):
+        if not isinstance(segment, str):
+            restoring = False
+            continue
+        if not restoring and segment != segment.lower():
+            return False
+        if isinstance(segment, FieldKey) and segment.field_info is not None:
+            restoring = restoring and _restores_key_case(segment.field_info, top_level=i == 0)
+    return True
 
 
 def path_to_str(path: list[str | ListIndex | DictKey]) -> str:
@@ -92,6 +241,12 @@ class FieldInfoContainer:
         as the dict ``{"0": ...}`` and fails list validation, so list elements only
         change through the JSON value of the whole list. Without
         ``env_nested_delimiter`` only top-level fields have an env var.
+
+        A field with an alias is named by its alias, and ``env_prefix`` goes in front
+        of the top-level key only where ``env_prefix_target`` says so: ``"variable"``
+        (the default) for field names, ``"alias"`` for aliases, ``"all"`` for both.
+        pydantic-settings reads each element of an ``AliasPath`` as an env var of its
+        own, so no env var sets just a field with an ``AliasPath``.
         """
         config = self.root_settings_class.model_config
         delimiter = config.get("env_nested_delimiter") or ""
@@ -101,6 +256,8 @@ class FieldInfoContainer:
             prefix = prefix.upper()
 
         if any(isinstance(segment, ListIndex) for segment in self.path):
+            return None
+        if any(isinstance(segment, FieldKey) and segment.in_alias_path for segment in self.path):
             return None
 
         if len(self.path) > 1 and not delimiter:
@@ -117,6 +274,23 @@ class FieldInfoContainer:
                     "See https://docs.pydantic.dev/latest/concepts/pydantic_settings/#parsing-environment-variable-values"
                 )
             return None
+
+        if not case_sensitive and not _env_keys_match_case_insensitively(self.path):
+            return None
+
+        top = self.path[0]
+        top_is_alias = isinstance(top, FieldKey) and top.is_alias
+        if (
+            top_is_alias
+            and len(self.path) > 1
+            and (config.get("populate_by_name") or config.get("validate_by_name"))
+        ):
+            # pydantic-settings files these env vars under the field name, next to the
+            # alias key from the YAML file, and validation rejects the field name.
+            return None
+        prefix_target = config.get("env_prefix_target") or "variable"
+        if prefix_target not in (("alias", "all") if top_is_alias else ("variable", "all")):
+            prefix = ""
 
         parts: list[str] = []
         for segment in self.path:
@@ -141,8 +315,12 @@ class FieldInfoContainer:
         annotation = clean_annotation(self.get_annotation())
         if not (annotation is dict or get_origin(annotation) is dict):
             return None
-        env_var = self.get_env_var()
-        return env_var + delimiter + ENV_VAR_DICTKEY_PLACEHOLDER if env_var else None
+        # The entry's own env var, so the alias and case rules of get_env_var apply.
+        return FieldInfoContainer(
+            path=self.path + [DictKey(key=ANY_ITEM)],
+            field_name=ENV_VAR_DICTKEY_PLACEHOLDER,
+            root_settings_class=self.root_settings_class,
+        ).get_env_var()
 
     def get_path_str(self) -> str:
         return path_to_str(self.path)
@@ -190,10 +368,10 @@ class FieldInfoContainer:
                 if cls in seen:
                     continue
                 for name, fi in cls.model_fields.items():
-                    key = yaml_key(name, fi)
+                    key_path = yaml_key_path(cls, name, fi)
                     child = FieldInfoContainer(
-                        path=container.path + [key],
-                        field_name=key,
+                        path=container.path + key_path,
+                        field_name=key_name(key_path),
                         field_info=fi,
                         root_settings_class=self.root_settings_class,
                     )
@@ -241,7 +419,7 @@ class FieldInfoContainer:
             if fi.default is None:
                 data["Default:"] = "null"
             else:
-                data["Default:"] = to_json_text(fi.default)
+                data["Default:"] = to_json_text(yaml_keyed(fi.default))
 
         enum_vals = self.get_enum_vals()
         if enum_vals is not None:
@@ -292,7 +470,7 @@ class FieldInfoContainer:
             label = f"Example No. {i + 1}:" if len(examples) > 1 else "Example:"
             lines.append(label)
             try:
-                as_yaml = to_yaml_text({key: example})
+                as_yaml = to_yaml_text({key: yaml_keyed(example)})
                 for line in as_yaml.rstrip("\n").split("\n"):
                     lines.append(f" >{line}")
             except Exception:

@@ -1,4 +1,4 @@
-"""Tests for psyplus/yaml_generator.py — YamlFileGenerator."""
+"""Tests for psyplus/yaml_generator.py: YamlFileGenerator."""
 import yaml
 import pytest
 
@@ -22,7 +22,7 @@ def _generate(model_cls) -> tuple[str, dict]:
 
 
 # ---------------------------------------------------------------------------
-# YamlFileGenerator — flat model
+# YamlFileGenerator: flat model
 # ---------------------------------------------------------------------------
 
 class TestFlatModelGeneration:
@@ -111,7 +111,7 @@ class TestFlatModelGeneration:
 
 
 # ---------------------------------------------------------------------------
-# YamlFileGenerator — nested model
+# YamlFileGenerator: nested model
 # ---------------------------------------------------------------------------
 
 class TestNestedModelGeneration:
@@ -149,7 +149,7 @@ class TestNestedModelGeneration:
 
 
 # ---------------------------------------------------------------------------
-# YamlFileGenerator — multi-nested (List/Dict of BaseModel)
+# YamlFileGenerator: multi-nested (List/Dict of BaseModel)
 # ---------------------------------------------------------------------------
 
 class TestMultiNestedGeneration:
@@ -188,7 +188,7 @@ class TestMultiNestedGeneration:
 
 
 # ---------------------------------------------------------------------------
-# YamlFileGenerator — README example model
+# YamlFileGenerator: README example model
 # ---------------------------------------------------------------------------
 
 class TestReadmeExampleModel:

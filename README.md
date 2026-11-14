@@ -1,13 +1,13 @@
 # pydantic-settings-yaml-plus
 
-A helper library that builds upon [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/) to **generate**, **read**, and **document** YAML config files — with comment headers that explain every setting's type, default value, allowed values, environment variable override, and description.
+A helper library that builds upon [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/) to **generate**, **read**, and **document** YAML config files, with comment headers that explain every setting's type, default value, allowed values, environment variable override, and description.
 
 - [pydantic-settings-yaml-plus](#pydantic-settings-yaml-plus)
   - [Features](#features)
   - [Installation](#installation)
   - [Quick start](#quick-start)
-    - [1 — Define your settings model](#1--define-your-settings-model)
-    - [2 — Generate the YAML config file](#2--generate-the-yaml-config-file)
+    - [1. Define your settings model](#1-define-your-settings-model)
+    - [2. Generate the YAML config file](#2-generate-the-yaml-config-file)
   - [Generated YAML output](#generated-yaml-output)
   - [Reading the config](#reading-the-config)
   - [Generating Markdown documentation](#generating-markdown-documentation)
@@ -31,12 +31,12 @@ A helper library that builds upon [pydantic-settings](https://docs.pydantic.dev/
 
 ## Features
 
-- **Generate documented YAML** — each field gets a comment block with its type, required flag, default value, allowed enum values, corresponding environment variable, description, and examples.
-- **Nested models** — `BaseModel` sub-models are rendered as indented YAML sections with full comment headers.
-- **Read back with env-var override** — `load()` loads the YAML file and still applies environment variable overrides using pydantic-settings' standard machinery.
+- **Generate documented YAML:** each field gets a comment block with its type, required flag, default value, allowed enum values, corresponding environment variable, description, and examples.
+- **Nested models:** `BaseModel` sub-models are rendered as indented YAML sections with full comment headers.
+- **Read back with env-var override:** `load()` loads the YAML file and still applies environment variable overrides using pydantic-settings' standard machinery.
 - **Single list elements from env vars:** `load()` also reads env vars like `APP_SERVERS__0__HOST` that change one element of a list from the YAML file.
-- **Markdown docs** — generate a Markdown reference document straight from your settings class.
-- **Zero boilerplate** — define your settings in a standard `pydantic_settings.BaseSettings` subclass; psyplus does the rest.
+- **Markdown docs:** generate a Markdown reference document straight from your settings class.
+- **Zero boilerplate:** define your settings in a standard `pydantic_settings.BaseSettings` subclass; psyplus does the rest.
 
 ---
 
@@ -52,7 +52,7 @@ pip install psyplus
 
 ## Quick start
 
-### 1 — Define your settings model
+### 1. Define your settings model
 
 ```python
 # config.py
@@ -107,7 +107,7 @@ class MyAppConfig(BaseSettings):
 
 > **Note on `model_config`:** use `SettingsConfigDict` (pydantic-settings v2 style) rather than the old inner `class Config`. Both work, but `SettingsConfigDict` is preferred.
 
-### 2 — Generate the YAML config file
+### 2. Generate the YAML config file
 
 ```python
 from psyplus import YamlSettingsPlus
@@ -209,6 +209,7 @@ database_server:
 # Type:     Dictionary of (str, str)
 # Required: True
 # Env-var:  'APP_INIT_VALUES'
+#           'APP_INIT_VALUES__<dict-key>' sets one entry, its key arrives in lower case
 init_values:
 ```
 
@@ -306,7 +307,7 @@ The table below links the bundled test models to their pre-generated output so y
 |---|---|---|---|---|
 | `SimpleModel` | [tests/models/simple.py](tests/models/simple.py) | Flat settings: scalars, Optional, Literal, List, Dict, Annotated metadata, `default_factory` | [SimpleModel.yaml](smoke_output/SimpleModel.yaml) | [SimpleModel.md](smoke_output/SimpleModel.md) |
 | `NestedModel` | [tests/models/nested.py](tests/models/nested.py) | Nested `BaseModel` sub-field, optional sub-model, env-var path generation with `env_nested_delimiter` | [NestedModel.yaml](smoke_output/NestedModel.yaml) | [NestedModel.md](smoke_output/NestedModel.md) |
-| `MultiNestedModel` | [tests/models/nested.py](tests/models/nested.py) | `List[BaseModel]` and `Dict[str, BaseModel]` fields — YAML renders each item, Markdown recurses into the item schema | [MultiNestedModel.yaml](smoke_output/MultiNestedModel.yaml) | [MultiNestedModel.md](smoke_output/MultiNestedModel.md) |
+| `MultiNestedModel` | [tests/models/nested.py](tests/models/nested.py) | `List[BaseModel]` and `Dict[str, BaseModel]` fields; YAML renders each item, Markdown recurses into the item schema | [MultiNestedModel.yaml](smoke_output/MultiNestedModel.yaml) | [MultiNestedModel.md](smoke_output/MultiNestedModel.md) |
 | `MyAppConfig` | [tests/models/readme_example.py](tests/models/readme_example.py) | The full README quick-start model with nested database settings and field examples | [MyAppConfig.yaml](smoke_output/MyAppConfig.yaml) | [MyAppConfig.md](smoke_output/MyAppConfig.md) |
 
 These files are regenerated automatically by the smoke script (`pdm run smoke`) and committed to the repository, so they are always in sync with the current code.

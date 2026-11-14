@@ -1,5 +1,5 @@
 """
-Smoke test — generates YAML config templates and Markdown docs for every test
+Smoke test: generates YAML config templates and Markdown docs for every test
 model and writes them to smoke_output/ so you can inspect the real output.
 
 Usage:

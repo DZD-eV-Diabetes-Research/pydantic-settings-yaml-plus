@@ -1,4 +1,4 @@
-"""Nested settings model used in tests — covers BaseModel sub-models and lists of sub-models."""
+"""Nested settings model used in tests. Covers BaseModel sub-models and lists of sub-models."""
 from pathlib import Path, PurePath
 from typing import Annotated, Dict, List, Literal, Optional
 

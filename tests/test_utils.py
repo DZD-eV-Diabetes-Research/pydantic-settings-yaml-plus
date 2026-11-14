@@ -1,4 +1,4 @@
-"""Tests for psyplus/utils.py — annotation helpers and formatting utilities."""
+"""Tests for psyplus/utils.py: annotation helpers and formatting utilities."""
 import enum
 from pathlib import Path
 from typing import Annotated, Any, Dict, FrozenSet, List, Literal, Optional, Set, Tuple, Union

@@ -44,7 +44,7 @@ A helper library that builds upon [pydantic-settings](https://docs.pydantic.dev/
 pip install psyplus
 ```
 
-**Requirements:** Python ≥ 3.11, pydantic ≥ 2.0, pydantic-settings ≥ 2.3
+**Requirements:** Python ≥ 3.11, pydantic ≥ 2.10, pydantic-settings ≥ 2.13.1, ruamel.yaml ≥ 0.17.5, PyYAML ≥ 6.0.1
 
 ---
 

@@ -50,6 +50,15 @@ class DictKey:
         return f"['{self.key}']"
 
 
+def yaml_key(field_name: str, field_info: pydantic_fields.FieldInfo) -> str:
+    """The key of a model field in the YAML file.
+
+    The single place that decides it: the YAML generator, the Markdown generator and
+    the env var names all build their paths from this key.
+    """
+    return field_name
+
+
 def path_to_str(path: list[str | ListIndex | DictKey]) -> str:
     """``["servers", ListIndex(0), "host"]`` -> ``servers[0].host``."""
     out = ""
@@ -162,7 +171,8 @@ class FieldInfoContainer:
             cls = clean_annotation(container.get_annotation())
             if not (isinstance(cls, type) and issubclass(cls, BaseModel)) or cls in seen:
                 return
-            for key, fi in cls.model_fields.items():
+            for name, fi in cls.model_fields.items():
+                key = yaml_key(name, fi)
                 child = FieldInfoContainer(
                     path=container.path + [key],
                     field_name=key,

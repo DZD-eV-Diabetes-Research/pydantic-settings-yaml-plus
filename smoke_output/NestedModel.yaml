@@ -45,7 +45,7 @@ database:
   # Required:    True
   # Env-var:     'APP_DATABASE__NAME'
   # Description: Database name (required)
-  name: ''
+  name:
 
   # ## tags ###
   # YAML-path: database.tags
@@ -77,4 +77,4 @@ storage_dir: /home/user/.config/app
 # Required:    True
 # Env-var:     'APP_ADMIN_PASSWORD'
 # Description: Initial admin password (required)
-admin_password: ''
+admin_password:

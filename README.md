@@ -156,7 +156,7 @@ storage_dir: /home/user/.config/myapp
 # Required:    True
 # Env-var:     'APP_ADMIN_PW'
 # Description: The init password for the admin account
-admin_pw: ''
+admin_pw:
 
 # ## database_server ###
 # Type:        Object (DatabaseServerSettings)
@@ -200,17 +200,21 @@ database_server:
   #  >database_names:
   #  >- mydb
   #  >- theotherdb
-  database_names: []
+  database_names:
 
 # ## init_values ###
 # Type:     Dictionary of (str, str)
 # Required: True
 # Env-var:  'APP_INIT_VALUES'
-init_values: {}
+init_values:
 ```
 
-Required fields without defaults are written with an empty placeholder (`''`, `[]`, `{}`).  
-The `Required: True` comment tells the user they must fill these in before the app will validate.
+Required fields without a default are written with an empty value (`admin_pw:`, which YAML reads as null),
+whatever their type. A required sub-model without a default shows its fields, so the structure is
+visible, with its own required fields empty. The `Required: True` comment marks every value to fill in.
+Until that is done, `load()` raises a pydantic `ValidationError` that names each empty required field,
+so an app does not start with an unfilled config. (A required `Optional[...]` field is the exception:
+null is a valid value for it.)
 
 ---
 
@@ -345,7 +349,8 @@ psyplus works with any standard `pydantic_settings.BaseSettings` subclass. The r
 | `title="…"` | Appended to the `## field_name - Title ###` header |
 | `examples=[…]` | `# Example:` block with rendered YAML |
 | `default=…` | `# Default:` comment row |
-| `default_factory=lambda: …` | `# Default:` not shown (factory evaluated at generation time) |
+| `default_factory=lambda: …` | `# Default:` not shown (factory evaluated at generation time, its result is the value in the YAML file) |
+| `default_factory=lambda data: …` | Same, the factory gets the values of the fields defined before it. If it needs a required value without a default, the field is written empty with a note to remove the key |
 | `max_length=…` / `gt=…` / etc. | `# Constraints:` comment row |
 
 ### Configuring env vars

@@ -3,17 +3,18 @@ from __future__ import annotations
 import inspect
 import logging
 from io import StringIO
-from typing import Any, Literal, get_args, get_origin
+from typing import Annotated, Any, get_args, get_origin
 
 import yaml as pyyaml
 from pydantic import BaseModel, SecretBytes, SecretStr
-from pydantic_core import PydanticUndefined, to_jsonable_python
+from pydantic.fields import FieldInfo
+from pydantic_core import to_jsonable_python
 from pydantic_settings import BaseSettings
 from ruamel.yaml import YAML, CommentedMap, CommentedSeq
 from ruamel.yaml.scalarstring import SingleQuotedScalarString
 
-from psyplus.field_info import DictKey, FieldInfoContainer, ListIndex
-from psyplus.utils import clean_annotation, is_union
+from psyplus.field_info import DictKey, FieldInfoContainer, ListIndex, path_to_str, yaml_key
+from psyplus.utils import clean_annotation
 
 log = logging.getLogger(__name__)
 
@@ -30,73 +31,32 @@ def _yaml11_safe_str(value: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Placeholder building
+# Field values
 # ---------------------------------------------------------------------------
 
-def _placeholder_for(annotation: Any) -> Any:
-    """Return a type-appropriate placeholder value for a required field with no default.
+# A required field without a default: written as an empty value (null).
+_REQUIRED = object()
+# A default factory that could not be called at generation time: written as null.
+_UNRESOLVED = object()
+_MISSING = object()
 
-    Produces valid values so pydantic model_validate() won't reject the data.
-    The generated YAML will show empty strings / empty collections to signal
-    that the user must fill in required values.
+_UNRESOLVED_NOTE = (
+    "Note: the default is computed from other values when the settings load. "
+    "Remove this key to use it."
+)
+
+
+def _model_class(annotation: Any) -> type[BaseModel] | None:
+    """The model class a field is annotated with, or None.
+
+    Only a plain (or ``Annotated``) model counts. For ``Optional[Model]`` and other
+    unions null is a valid value or the member to show is unclear, so they get none.
     """
-    if annotation is None or annotation is Any:
-        return None
-
-    origin = get_origin(annotation)
-
-    if is_union(annotation):
-        non_none = [a for a in get_args(annotation) if a is not type(None)]
-        if not non_none:
-            return None
-        return _placeholder_for(non_none[0])
-
-    if origin is Literal:
-        return get_args(annotation)[0]
-
-    if annotation is str:
-        return ""
-    if annotation is int:
-        return 0
-    if annotation is float:
-        return 0.0
-    if annotation is bool:
-        return False
-
-    if origin is list or annotation is list:
-        return []
-    if origin is dict or annotation is dict:
-        return {}
-    if origin is set or annotation is set:
-        return []  # sets become lists in YAML
-
+    while get_origin(annotation) is Annotated:
+        annotation = get_args(annotation)[0]
     if inspect.isclass(annotation) and issubclass(annotation, BaseModel):
-        return _build_dict_for_class(annotation)
-
+        return annotation
     return None
-
-
-def _build_dict_for_class(cls: type[BaseModel]) -> dict[str, Any]:
-    """Build a dict of placeholder values for every field in *cls*."""
-    result: dict[str, Any] = {}
-    for key, fi in cls.model_fields.items():
-        if fi.default is not PydanticUndefined:
-            result[key] = fi.default
-        elif fi.default_factory is not None:
-            result[key] = fi.default_factory()
-        else:
-            result[key] = _placeholder_for(fi.annotation)
-    return result
-
-
-def build_settings_instance(cls: type[BaseSettings]) -> BaseSettings:
-    """Instantiate *cls* with placeholder values for all required fields.
-
-    Uses model_validate (not __init__) so that pydantic-settings env-var
-    reading is bypassed — we only want the template structure.
-    """
-    data = _build_dict_for_class(cls)
-    return cls.model_validate(data)
 
 
 # ---------------------------------------------------------------------------
@@ -117,11 +77,18 @@ class YamlFileGenerator:
         # https://yaml.readthedocs.io/en/latest/detail/#indentation-of-block-sequences
         self._yaml.indent(sequence=indent_size + 2, offset=indent_size)
         self._model: CommentedMap | None = None
+        # Model classes walked without an instance right now, to stop on recursive models.
+        self._walking: list[type[BaseModel]] = []
 
     def parse(self) -> None:
-        """Build the internal CommentedMap from the settings class."""
-        instance = build_settings_instance(self.settings_class)
-        self._model = self._parse_model(instance, parent_path=[])
+        """Build the internal CommentedMap from the settings class.
+
+        The class is walked, nothing is instantiated or validated: fields with a
+        default show it, a required field without a default is written as an empty
+        value (null) and a required sub-model as the map of its fields. So the
+        untouched template does not load until the user fills in the required values.
+        """
+        self._model = self._walk_class(self.settings_class, [])
 
     def get_yaml(self) -> str:
         """Return the generated YAML string. Call parse() first."""
@@ -137,23 +104,42 @@ class YamlFileGenerator:
 
     def _parse_model(
         self,
-        instance: BaseSettings | BaseModel,
+        cls: type[BaseModel],
+        instance: BaseModel | None,
         parent_path: list[str | ListIndex | DictKey],
     ) -> CommentedMap:
+        """Encode the fields of *cls*.
+
+        A field's value comes from *instance* (a default sub-model or a list or dict
+        item) when given, otherwise from the field's default.
+        """
         level = len(parent_path)
         result = CommentedMap()
+        # The values so far, passed to default factories that take the validated data.
+        data: dict[str, Any] = {}
 
-        for key, fi in type(instance).model_fields.items():
+        for name, fi in cls.model_fields.items():
+            key = yaml_key(name, fi)
             path = parent_path + [key]
-            value = getattr(instance, key)
-            result[key] = self._encode_value(value, fi.annotation, path)
+            value = self._field_value(name, fi, instance, data, path)
+
+            sub_cls = _model_class(fi.annotation) if value is _REQUIRED else None
+            if sub_cls is not None and sub_cls not in self._walking:
+                result[key] = self._walk_class(sub_cls, path)
+            elif value is _REQUIRED or value is _UNRESOLVED:
+                result[key] = None
+            else:
+                data[name] = value
+                result[key] = self._encode_value(value, fi.annotation, path)
 
             comment_lines = FieldInfoContainer(
                 path=path,
                 field_name=key,
                 field_info=fi,
                 root_settings_class=self.settings_class,
-            ).build_comment_lines(list_sub_field_env_vars=value is None)
+            ).build_comment_lines(list_sub_field_env_vars=result[key] is None)
+            if value is _UNRESOLVED:
+                comment_lines.append(_UNRESOLVED_NOTE)
 
             result.yaml_set_comment_before_after_key(
                 key=key,
@@ -163,14 +149,54 @@ class YamlFileGenerator:
 
         return result
 
+    def _walk_class(
+        self,
+        cls: type[BaseModel],
+        path: list[str | ListIndex | DictKey],
+    ) -> CommentedMap:
+        """Encode a model class without an instance: its fields with their defaults."""
+        self._walking.append(cls)
+        try:
+            return self._parse_model(cls, None, path)
+        finally:
+            self._walking.pop()
+
+    def _field_value(
+        self,
+        name: str,
+        fi: FieldInfo,
+        instance: BaseModel | None,
+        data: dict[str, Any],
+        path: list[str | ListIndex | DictKey],
+    ) -> Any:
+        """The value to write for a field, or ``_REQUIRED`` / ``_UNRESOLVED``."""
+        if instance is not None:
+            # A model_construct()ed instance can lack fields; fall back to the class.
+            value = getattr(instance, name, _MISSING)
+            if value is not _MISSING:
+                return value
+        if fi.is_required():
+            return _REQUIRED
+        try:
+            return fi.get_default(call_default_factory=True, validated_data=dict(data))
+        except Exception as e:
+            if fi.default_factory is None:
+                raise
+            # e.g. a factory that reads a required value from the validated data.
+            log.warning(
+                f"The default factory of `{path_to_str(path)}` failed at generation time "
+                f"({e!r}), writing null."
+            )
+            return _UNRESOLVED
+
     def _encode_value(
         self,
         value: Any,
         annotation: Any,
         path: list[str | ListIndex | DictKey],
     ) -> Any:
-        if isinstance(value, (BaseSettings, BaseModel)):
-            return self._parse_model(value, path)
+        if isinstance(value, BaseModel):
+            return self._parse_model(type(value), value, path)
         if isinstance(value, dict):
             return self._encode_dict(value, annotation, path)
         if isinstance(value, (list, tuple, set, frozenset)):

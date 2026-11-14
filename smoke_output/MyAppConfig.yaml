@@ -30,7 +30,7 @@ storage_dir: /home/user/.config/myapp
 # Required:    True
 # Env-var:     'APP_ADMIN_PW'
 # Description: The init password for the admin account
-admin_pw: ''
+admin_pw:
 
 # ## database_server ###
 # Type:        Object (DatabaseServerSettings)
@@ -74,10 +74,10 @@ database_server:
   #  >database_names:
   #  >- mydb
   #  >- theotherdb
-  database_names: []
+  database_names:
 
 # ## init_values ###
 # Type:     Dictionary of (str, str)
 # Required: True
 # Env-var:  'APP_INIT_VALUES'
-init_values: {}
+init_values:

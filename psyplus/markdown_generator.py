@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
 from pydantic_settings import BaseSettings
 
-from psyplus.field_info import ANY_ITEM, DictKey, FieldInfoContainer, ListIndex, path_to_str
+from psyplus.field_info import ANY_ITEM, DictKey, FieldInfoContainer, ListIndex, path_to_str, yaml_key
 from psyplus.utils import clean_annotation, readable_constraints, to_json_text, to_yaml_text
 
 log = logging.getLogger(__name__)
@@ -44,7 +44,8 @@ class MarkdownDocGenerator:
         _seen: tuple[type[BaseModel], ...] = (),
     ) -> None:
         _seen = _seen + (cls,)
-        for key, fi in cls.model_fields.items():
+        for name, fi in cls.model_fields.items():
+            key = yaml_key(name, fi)
             path = parent_path + [key]
             container = FieldInfoContainer(
                 path=path,

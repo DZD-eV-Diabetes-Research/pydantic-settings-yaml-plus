@@ -2,7 +2,7 @@
 
 For each scalar (str/int) leaf that has an env var in the generated YAML comments or in
 the Markdown doc:
-  1. write the generated YAML template to disk,
+  1. write the generated YAML template to disk (with its empty required values filled in),
   2. set the documented env var (placeholders replaced by a real key) to a sentinel,
   3. call YamlSettingsPlus.load(),
   4. assert the leaf now holds the sentinel.
@@ -35,6 +35,17 @@ MODELS = [
     MultiNestedModel,
     MyAppConfig,
 ]
+
+# The template leaves required values without a default empty (null), so it does not
+# load untouched. These fill them in; fill_required() checks each replaces a null.
+REQUIRED_VALUES = {
+    NestedModel: {"admin_password": "pw", "database": {"name": "db"}},
+    MyAppConfig: {
+        "admin_pw": "pw",
+        "database_server": {"database_names": ["db"]},
+        "init_values": {"k": "v"},
+    },
+}
 
 _SEGMENT = re.compile(r"\[(\d+|\*|'[^']*')\]|([^.\[\]]+)")
 
@@ -140,6 +151,15 @@ def annotation_at(model, prefix):
     return ann
 
 
+def fill_required(template: dict, values: dict) -> None:
+    for key, value in values.items():
+        if isinstance(value, dict) and isinstance(template.get(key), dict):
+            fill_required(template[key], value)
+        else:
+            assert template[key] is None, f"{key!r} is not empty in the template"
+            template[key] = value
+
+
 def is_dict_key(model, prefix) -> bool:
     """True if the segment after *prefix* is a dict key, not a field name."""
     return get_origin(clean_annotation(annotation_at(model, prefix))) is dict
@@ -153,6 +173,7 @@ def collect():
     params = []
     for model in MODELS:
         template = yaml.safe_load(YamlSettingsPlus(model).render_yaml())
+        fill_required(template, REQUIRED_VALUES.get(model, {}))
         names = [("yaml", p, n) for p, n in yaml_env_names(model).items()]
         names += [("md", p, n) for p, n in md_env_names(model).items()]
         for source, path, env in names:

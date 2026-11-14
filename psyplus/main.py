@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Literal, Type, Union
 
-import yaml
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, YamlConfigSettingsSource
 
 from psyplus.markdown_generator import MarkdownDocGenerator
 from psyplus.yaml_generator import YamlFileGenerator
-
-log = logging.getLogger(__name__)
 
 
 class YamlSettingsPlus:
@@ -47,6 +43,10 @@ class YamlSettingsPlus:
         """
         if self.config_file is None:
             raise ValueError("file_path must be set to generate a config file.")
+        if on_exists not in ("skip", "overwrite", "error"):
+            raise ValueError(
+                f"on_exists must be 'skip', 'overwrite' or 'error', not {on_exists!r}."
+            )
 
         self.config_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -60,11 +60,11 @@ class YamlSettingsPlus:
                 )
             # on_exists == "overwrite" → fall through
 
-        self.config_file.write_text(self.render_yaml())
+        self.config_file.write_text(self.render_yaml(), encoding="utf-8")
 
     def generate_markdown_doc(self, output_path: Union[str, Path]) -> None:
         """Write a Markdown reference document for the settings model to *output_path*."""
-        Path(output_path).write_text(self.render_markdown())
+        Path(output_path).write_text(self.render_markdown(), encoding="utf-8")
 
     # ------------------------------------------------------------------
     # Render to string (no file I/O)
@@ -91,8 +91,10 @@ class YamlSettingsPlus:
         ``env_nested_delimiter``) take priority over YAML file values,
         following standard pydantic-settings source precedence.
 
-        Tip: if you want this behaviour without psyplus, configure
-        ``yaml_file`` directly in your model's ``model_config``::
+        Tip: to get similar behaviour without psyplus, set ``yaml_file`` in
+        your model's ``model_config`` and add a ``YamlConfigSettingsSource``
+        in ``settings_customise_sources``. Setting ``yaml_file`` alone is not
+        enough, pydantic-settings does not read it by default::
 
             class MyConfig(BaseSettings):
                 model_config = SettingsConfigDict(
@@ -101,43 +103,46 @@ class YamlSettingsPlus:
                     env_nested_delimiter="__",
                 )
 
-            config = MyConfig()  # reads YAML + env vars automatically
+                @classmethod
+                def settings_customise_sources(
+                    cls, settings_cls, init_settings, env_settings,
+                    dotenv_settings, file_secret_settings,
+                ):
+                    return (
+                        init_settings, env_settings, dotenv_settings,
+                        file_secret_settings,
+                        YamlConfigSettingsSource(settings_cls),
+                    )
         """
         if self.config_file is None:
             raise ValueError("file_path must be set to load a config file.")
 
         yaml_path = self.config_file
         base_cls = self.model
+        # The generated file is written as UTF-8, so read it as UTF-8 unless the
+        # model asks for another encoding.
+        encoding = base_cls.model_config.get("yaml_file_encoding") or "utf-8"
 
-        try:
-            try:
-                from pydantic_settings import YamlSettingsSource as _YamlSource
-            except ImportError:
-                from pydantic_settings import YamlConfigSettingsSource as _YamlSource  # type: ignore[assignment]
-
-            class _ModelWithYaml(base_cls):  # type: ignore[valid-type,misc]
-                @classmethod
-                def settings_customise_sources(
-                    cls,
-                    settings_cls: Type[BaseSettings],
+        class _ModelWithYaml(base_cls):  # type: ignore[valid-type,misc]
+            @classmethod
+            def settings_customise_sources(
+                cls,
+                settings_cls: Type[BaseSettings],
+                init_settings,
+                env_settings,
+                dotenv_settings,
+                file_secret_settings,
+            ):
+                # The YAML file is the lowest file based source: env vars, the
+                # .env file and the secrets directory all override it.
+                return (
                     init_settings,
                     env_settings,
                     dotenv_settings,
                     file_secret_settings,
-                ):
-                    return (
-                        init_settings,
-                        env_settings,
-                        _YamlSource(settings_cls, yaml_file=yaml_path),
-                    )
+                    YamlConfigSettingsSource(
+                        settings_cls, yaml_file=yaml_path, yaml_file_encoding=encoding
+                    ),
+                )
 
-            return _ModelWithYaml()
-
-        except ImportError:
-            log.warning(
-                "pydantic-settings >= 2.3 is required for automatic env-var overlay "
-                "in load(). Falling back to YAML-only loading."
-            )
-            with open(yaml_path) as fh:
-                data = yaml.safe_load(fh) or {}
-            return self.model.model_validate(data)
+        return _ModelWithYaml()

@@ -5,15 +5,28 @@ import logging
 from io import StringIO
 from typing import Any, Literal, get_args, get_origin
 
-from pydantic import BaseModel
-from pydantic_core import PydanticUndefined
+import yaml as pyyaml
+from pydantic import BaseModel, SecretBytes, SecretStr
+from pydantic_core import PydanticUndefined, to_jsonable_python
 from pydantic_settings import BaseSettings
 from ruamel.yaml import YAML, CommentedMap, CommentedSeq
+from ruamel.yaml.scalarstring import SingleQuotedScalarString
 
 from psyplus.field_info import DictKey, FieldInfoContainer, ListIndex
 from psyplus.utils import clean_annotation, is_union
 
 log = logging.getLogger(__name__)
+
+# ruamel writes YAML 1.2, but pydantic-settings reads the file with PyYAML (YAML 1.1),
+# where plain `yes`, `on`, `off`, `1:30` ... are bools/ints. Quote such strings.
+_PYYAML_RESOLVER = pyyaml.resolver.Resolver()
+_YAML_STR_TAG = "tag:yaml.org,2002:str"
+
+
+def _yaml11_safe_str(value: str) -> str:
+    if _PYYAML_RESOLVER.resolve(pyyaml.nodes.ScalarNode, value, (True, False)) != _YAML_STR_TAG:
+        return SingleQuotedScalarString(value)
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +129,7 @@ class YamlFileGenerator:
             raise RuntimeError("Call parse() before get_yaml().")
         stream = StringIO()
         self._yaml.dump(self._model, stream)
-        return stream.getvalue()
+        return stream.getvalue().lstrip("\n")
 
     # ------------------------------------------------------------------
     # Internal: model / dict / list recursion
@@ -140,7 +153,7 @@ class YamlFileGenerator:
                 field_name=key,
                 field_info=fi,
                 root_settings_class=self.settings_class,
-            ).build_comment_lines()
+            ).build_comment_lines(list_sub_field_env_vars=value is None)
 
             result.yaml_set_comment_before_after_key(
                 key=key,
@@ -160,8 +173,18 @@ class YamlFileGenerator:
             return self._parse_model(value, path)
         if isinstance(value, dict):
             return self._encode_dict(value, annotation, path)
-        if isinstance(value, list):
-            return self._encode_list(value, annotation, path)
+        if isinstance(value, (list, tuple, set, frozenset)):
+            return self._encode_list(list(value), annotation, path)
+        if isinstance(value, (SecretStr, SecretBytes)):
+            value = value.get_secret_value()
+        if type(value) not in (int, float, bool, type(None)):
+            # Enum, Path, Decimal, UUID, SecretStr, Url, time, ... are not representable
+            # by ruamel; dump them the way pydantic serialises them to JSON.
+            value = to_jsonable_python(value)
+            if isinstance(value, (dict, list)):
+                return self._encode_value(value, annotation, path)
+        if isinstance(value, str):
+            return _yaml11_safe_str(value)
         return value
 
     def _encode_dict(
@@ -180,6 +203,8 @@ class YamlFileGenerator:
 
         for dict_key, dict_val in value.items():
             item_path = parent_path + [DictKey(key=dict_key)]
+            if isinstance(dict_key, str):
+                dict_key = _yaml11_safe_str(dict_key)
             result[dict_key] = self._encode_value(dict_val, val_annotation, item_path)
 
             comment_lines = FieldInfoContainer(
@@ -187,7 +212,7 @@ class YamlFileGenerator:
                 field_name=str(dict_key),
                 annotation=val_annotation,
                 root_settings_class=self.settings_class,
-            ).build_comment_lines()
+            ).build_comment_lines(overwrite_required=False)
 
             result.yaml_set_comment_before_after_key(
                 key=dict_key,

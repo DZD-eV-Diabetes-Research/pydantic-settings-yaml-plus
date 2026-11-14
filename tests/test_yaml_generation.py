@@ -300,3 +300,69 @@ def test_get_yaml_before_parse_raises():
     gen = YamlFileGenerator(SimpleModel)
     with pytest.raises(RuntimeError, match="parse"):
         gen.get_yaml()
+
+
+class TestValueEncoding:
+    def test_no_leading_blank_line(self):
+        raw, _ = _generate(SimpleModel)
+        assert not raw.startswith("\n")
+
+    def test_special_default_types_render(self):
+        import decimal
+        import enum
+        import uuid
+        from pathlib import Path
+        from typing import FrozenSet, Set, Tuple
+
+        from pydantic import SecretStr
+        from pydantic_settings import BaseSettings
+
+        class Color(enum.Enum):
+            RED = "red"
+
+        class M(BaseSettings):
+            where: Path = Path("/tmp/x")
+            color: Color = Color.RED
+            amount: decimal.Decimal = decimal.Decimal("1.5")
+            ident: uuid.UUID = uuid.UUID(int=1)
+            secret: SecretStr = SecretStr("pw")
+            tags: Set[int] = {1}
+            frozen: FrozenSet[int] = frozenset({2})
+            pair: Tuple[int, int] = (1, 2)
+
+        _, parsed = _generate(M)
+        assert parsed == {
+            "where": "/tmp/x",
+            "color": "red",
+            "amount": "1.5",
+            "ident": "00000000-0000-0000-0000-000000000001",
+            "secret": "pw",
+            "tags": [1],
+            "frozen": [2],
+            "pair": [1, 2],
+        }
+
+    def test_yaml11_bool_and_sexagesimal_strings_are_quoted(self):
+        from typing import Dict
+
+        from pydantic_settings import BaseSettings
+
+        class M(BaseSettings):
+            yes_str: str = "yes"
+            time_like: str = "1:30"
+            keys: Dict[str, int] = {"on": 1}
+
+        _, parsed = _generate(M)
+        assert parsed == {"yes_str": "yes", "time_like": "1:30", "keys": {"on": 1}}
+
+    def test_dict_entries_are_not_required(self):
+        from typing import Dict
+
+        from pydantic_settings import BaseSettings
+
+        class M(BaseSettings):
+            labels: Dict[str, int] = {"team": 1}
+
+        raw, _ = _generate(M)
+        entry = raw.split("# ## team ###", 1)[1]
+        assert "Required:  False" in entry.split("team:", 1)[0]

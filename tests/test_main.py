@@ -84,6 +84,12 @@ class TestGenerateConfigFile:
         with pytest.raises(FileExistsError, match="on_exists='overwrite'"):
             handler.generate_config_file(on_exists="error")
 
+    def test_on_exists_unknown_value_raises(self, tmp_path):
+        path = tmp_path / "config.yaml"
+        with pytest.raises(ValueError, match="on_exists"):
+            YamlSettingsPlus(SimpleModel, path).generate_config_file(on_exists="replace")
+        assert not path.exists()
+
     def test_on_exists_error_creates_when_missing(self, tmp_path):
         path = tmp_path / "config.yaml"
         YamlSettingsPlus(SimpleModel, path).generate_config_file(on_exists="error")
@@ -223,7 +229,113 @@ class TestLoad:
         handler.generate_config_file()
         # Provide required values via env vars so validation passes
         monkeypatch.setenv("APP_ADMIN_PW", "secret")
-        monkeypatch.setenv("APP__DATABASE_SERVER__DATABASE_NAMES", '["db1"]')
+        monkeypatch.setenv("APP_DATABASE_SERVER__DATABASE_NAMES", '["db1"]')
         monkeypatch.setenv("APP_INIT_VALUES", '{"k": "v"}')
         config = handler.load()
         assert isinstance(config, MyAppConfig)
+        assert config.admin_pw == "secret"
+        assert config.database_server.database_names == ["db1"]
+        assert config.init_values == {"k": "v"}
+
+
+class TestLoadNestedEnv:
+    def test_nested_leaf_env_keeps_yaml_siblings(self, tmp_path, monkeypatch):
+        from tests.models.nested import NestedModel
+
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump({
+            "admin_password": "pw",
+            "database": {"host": "yamlhost", "port": 1111, "name": "yamlname"},
+        }))
+        monkeypatch.setenv("APP_DATABASE__PORT", "2222")
+        config = YamlSettingsPlus(NestedModel, path).load()
+        assert config.database.port == 2222
+        assert config.database.host == "yamlhost"
+        assert config.database.name == "yamlname"
+
+    def test_dotenv_file_is_read(self, tmp_path):
+        from pydantic_settings import BaseSettings, SettingsConfigDict
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("DOT_VALUE=from_dotenv\n")
+
+        class DotenvModel(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="DOT_", env_file=env_file)
+            value: str = "default"
+
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump({"value": "from_yaml"}))
+        assert YamlSettingsPlus(DotenvModel, path).load().value == "from_dotenv"
+
+    def test_secrets_dir_overrides_yaml(self, tmp_path):
+        from pydantic_settings import BaseSettings, SettingsConfigDict
+
+        secrets = tmp_path / "secrets"
+        secrets.mkdir()
+        (secrets / "value").write_text("from_secret")
+
+        class SecretModel(BaseSettings):
+            model_config = SettingsConfigDict(secrets_dir=secrets)
+            value: str = "default"
+
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump({"value": "from_yaml"}))
+        assert YamlSettingsPlus(SecretModel, path).load().value == "from_secret"
+
+
+    def test_missing_file_gives_defaults(self, tmp_path, monkeypatch):
+        from pydantic_settings import BaseSettings, SettingsConfigDict
+
+        class DefaultsModel(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="DEF_")
+            name: str = "default"
+            port: int = 80
+
+        monkeypatch.setenv("DEF_PORT", "8080")
+        path = tmp_path / "does-not-exist.yaml"
+        config = YamlSettingsPlus(DefaultsModel, path).load()
+        assert not path.exists()
+        assert config.name == "default"
+        assert config.port == 8080
+
+    def test_documented_sub_field_env_var_of_null_sub_model(self, tmp_path, monkeypatch):
+        from tests.models.nested import NestedModel
+
+        path = tmp_path / "config.yaml"
+        handler = YamlSettingsPlus(NestedModel, path)
+        handler.generate_config_file()
+        assert "#   cache.host: 'APP_CACHE__HOST'" in path.read_text()
+        monkeypatch.setenv("APP_ADMIN_PASSWORD", "pw")
+        monkeypatch.setenv("APP_DATABASE__NAME", "db")
+        monkeypatch.setenv("APP_CACHE__HOST", "cachehost")
+        config = handler.load()
+        assert config.cache is not None
+        assert config.cache.host == "cachehost"
+        assert config.cache.port == 6379
+
+
+class TestRoundTrip:
+    """generate_config_file() then load() must give back the model defaults."""
+
+    def test_special_values_round_trip(self, tmp_path):
+        import enum
+        from typing import Dict, Literal
+
+        from pydantic_settings import BaseSettings
+
+        class Color(str, enum.Enum):
+            RED = "red"
+
+        class M(BaseSettings):
+            yes_str: str = "yes"
+            time_like: str = "1:30"
+            switch: Literal["on", "off"] = "on"
+            color: Color = Color.RED
+            where: Path = Path("/tmp/x")
+            keys: Dict[str, int] = {"on": 1}
+
+        path = tmp_path / "config.yaml"
+        handler = YamlSettingsPlus(M, path)
+        handler.generate_config_file()
+        # load() returns an instance of a subclass of M, so compare the values.
+        assert handler.load().model_dump() == M().model_dump()

@@ -18,6 +18,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import os
 os.environ.setdefault("PSYPLUS_SUPPRESS_ENV_WARNING", "true")
+# Some test models use Path.home() in a default_factory. Pin HOME so the committed
+# output is the same on every machine and matches the README sample (/home/user).
+os.environ["HOME"] = "/home/user"
 
 from pydantic_settings import BaseSettings
 

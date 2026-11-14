@@ -1,4 +1,3 @@
-
 # ## a_string ###
 # Type:     str
 # Required: False
@@ -50,17 +49,15 @@ literal_field: A
 string_list:
 
   # ## List[0] ###
-  # YAML-path: string_list.[0]
+  # YAML-path: string_list[0]
   # Type:      str
   # Required:  False
-  # Env-var:   'SIMPLE_STRING_LIST<list-index>'
   - x
 
   # ## List[1] ###
-  # YAML-path: string_list.[1]
+  # YAML-path: string_list[1]
   # Type:      str
   # Required:  False
-  # Env-var:   'SIMPLE_STRING_LIST<list-index>'
   - y
 
 # ## string_dict ###
@@ -71,10 +68,9 @@ string_list:
 string_dict:
 
   # ## one ###
-  # YAML-path: string_dict.['one']
+  # YAML-path: string_dict['one']
   # Type:      int
-  # Required:  True
-  # Env-var:   'SIMPLE_STRING_DICT<dict-key>'
+  # Required:  False
   one: 1
 
 # ## required_string ###

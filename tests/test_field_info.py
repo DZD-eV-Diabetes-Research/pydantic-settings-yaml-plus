@@ -23,6 +23,34 @@ class RootModel(BaseSettings):
 # ---------------------------------------------------------------------------
 
 class TestGetEnvVar:
+    def test_case_sensitive_keeps_field_case(self):
+        class CaseModel(BaseSettings):
+            model_config = SettingsConfigDict(
+                env_prefix="My_", env_nested_delimiter="__", case_sensitive=True
+            )
+
+        c = FieldInfoContainer(
+            path=["database", "hostName"],
+            field_name="hostName",
+            root_settings_class=CaseModel,
+        )
+        assert c.get_env_var() == "My_database__hostName"
+
+    def test_nested_field_without_delimiter_has_no_env_var(self, monkeypatch):
+        monkeypatch.setenv("PSYPLUS_SUPPRESS_ENV_WARNING", "1")
+
+        class NoDelimModel(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="ND_")
+
+        nested = FieldInfoContainer(
+            path=["database", "host"], field_name="host", root_settings_class=NoDelimModel
+        )
+        top = FieldInfoContainer(
+            path=["database"], field_name="database", root_settings_class=NoDelimModel
+        )
+        assert nested.get_env_var() is None
+        assert top.get_env_var() == "ND_DATABASE"
+
     def test_flat_field(self):
         c = FieldInfoContainer(
             path=["some_field"],
@@ -45,8 +73,8 @@ class TestGetEnvVar:
             field_name="name",
             root_settings_class=RootModel,
         )
-        env = c.get_env_var()
-        assert "<list-index>" in env
+        # pydantic-settings can not set a single list element
+        assert c.get_env_var() is None
 
     def test_dict_key_in_path(self):
         c = FieldInfoContainer(
@@ -93,6 +121,20 @@ class TestGetPathStr:
             root_settings_class=RootModel,
         )
         assert "[2]" in c.get_path_str()
+
+    def test_list_index_and_dict_key_join_without_dots(self):
+        c = FieldInfoContainer(
+            path=["servers", ListIndex(index=0), "host"],
+            field_name="host",
+            root_settings_class=RootModel,
+        )
+        assert c.get_path_str() == "servers[0].host"
+        c = FieldInfoContainer(
+            path=["labels", DictKey(key="team"), "name"],
+            field_name="name",
+            root_settings_class=RootModel,
+        )
+        assert c.get_path_str() == "labels['team'].name"
 
 
 # ---------------------------------------------------------------------------

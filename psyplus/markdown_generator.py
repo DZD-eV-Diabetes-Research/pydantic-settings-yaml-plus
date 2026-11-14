@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import logging
 from typing import Any, get_args, get_origin
 
@@ -9,9 +8,26 @@ from pydantic_core import PydanticUndefined
 from pydantic_settings import BaseSettings
 
 from psyplus.field_info import ANY_ITEM, DictKey, FieldInfoContainer, ListIndex, path_to_str, yaml_key
-from psyplus.utils import clean_annotation, readable_constraints, to_json_text, to_yaml_text
+from psyplus.utils import (
+    clean_annotation,
+    md_code,
+    md_heading,
+    md_table_cell,
+    model_members,
+    readable_constraints,
+    to_json_text,
+    to_yaml_text,
+)
 
 log = logging.getLogger(__name__)
+
+
+def _value_code(value: Any) -> str:
+    """A value as inline code: as is, or as JSON when it is empty or spans lines."""
+    text = str(value)
+    if not text or "\n" in text or "\r" in text:
+        text = to_json_text(value)
+    return md_code(text)
 
 
 class MarkdownDocGenerator:
@@ -24,7 +40,7 @@ class MarkdownDocGenerator:
         """Return the full markdown document as a string."""
         lines: list[str] = []
         name = self.settings_class.__name__
-        lines.append(f"# Configuration Reference — `{name}`\n")
+        lines.append(f"# Configuration Reference: `{name}`\n")
         lines.append(
             "This document is auto-generated from the pydantic-settings model. "
             "All settings can be provided via the YAML config file or overridden with environment variables.\n"
@@ -55,13 +71,24 @@ class MarkdownDocGenerator:
             )
             lines.extend(self._field_section(container, fi, heading_level))
 
-            # Recurse into nested BaseModel / BaseSettings fields (direct, list, or dict)
+            # Recurse into nested models: direct, Optional, Union of models, list or dict items
             annotation = clean_annotation(fi.annotation) if fi.annotation else None
             if not annotation:
                 continue
-            nested_cls, item_path = self._extract_nested(annotation, parent_path, key)
-            if nested_cls is not None and nested_cls not in _seen:
-                lines.extend(self._item_schema_intro(key, nested_cls, item_path, heading_level + 1))
+            models, item_path = self._extract_nested(annotation, parent_path, key)
+            for number, nested_cls in enumerate(models, start=1):
+                if nested_cls in _seen:
+                    continue
+                if len(models) > 1:
+                    # One section per alternative of a Union, its fields one level below.
+                    option = f"(option {number} of {len(models)})"
+                    lines.extend(self._schema_intro(nested_cls, item_path, heading_level + 1, option))
+                    self._walk_model(nested_cls, item_path, heading_level + 2, lines, _seen)
+                    continue
+                if item_path != path:
+                    # A list or dict item schema: the field section above describes the
+                    # collection, so the item fields get a small intro of their own.
+                    lines.extend(self._schema_intro(nested_cls, item_path, heading_level + 1))
                 self._walk_model(nested_cls, item_path, heading_level + 1, lines, _seen)
 
     def _extract_nested(
@@ -69,49 +96,48 @@ class MarkdownDocGenerator:
         annotation: Any,
         parent_path: list[str | ListIndex | DictKey],
         key: str,
-    ) -> tuple[type[BaseModel] | None, list[str | ListIndex | DictKey]]:
-        """Return (nested model class, path to use as parent) or (None, []).
+    ) -> tuple[list[type[BaseModel]], list[str | ListIndex | DictKey]]:
+        """Return (nested model classes, path to use as parent), or ([], []).
 
-        Handles three cases:
-          - direct BaseModel sub-field  → path stays the same (e.g. ``database.host``)
-          - List[BaseModel]             → path appended with ``key[*]``
-          - Dict[K, BaseModel]          → path appended with ``key[*]``
+        Handles three cases, each with a single model or a Union of models:
+          - direct sub-field (``Model``, ``Union[A, B]``): the path stays the same
+            (e.g. ``database.host``)
+          - ``List[Model]``: the path is appended with ``key[*]``
+          - ``Dict[K, Model]``: the path is appended with ``key[*]``
         """
         path = parent_path + [key]
 
-        if inspect.isclass(annotation) and issubclass(annotation, BaseModel):
-            return annotation, path
+        models = model_members(annotation)
+        if models:
+            return models, path
 
         origin = get_origin(annotation)
         args = get_args(annotation)
 
         if origin is list and args:
-            inner = args[0]
-            if inspect.isclass(inner) and issubclass(inner, BaseModel):
-                return inner, path + [ListIndex(index=ANY_ITEM)]
+            models = model_members(args[0])
+            if models:
+                return models, path + [ListIndex(index=ANY_ITEM)]
 
         if origin is dict and len(args) >= 2:
-            inner = args[1]
-            if inspect.isclass(inner) and issubclass(inner, BaseModel):
-                return inner, path + [DictKey(key=ANY_ITEM)]
+            models = model_members(args[1])
+            if models:
+                return models, path + [DictKey(key=ANY_ITEM)]
 
-        return None, []
+        return [], []
 
-    def _item_schema_intro(
+    def _schema_intro(
         self,
-        field_key: str,
         nested_cls: type[BaseModel],
         item_path: list[str | ListIndex | DictKey],
         heading_level: int,
+        suffix: str = "",
     ) -> list[str]:
-        """Emit a small intro heading when recursing into a list/dict item schema."""
-        # Direct sub-model already has its own field section as the intro — no extra header needed.
-        # Only add one for list/dict item types where the parent section describes the collection.
-        path_str = path_to_str(item_path)
-        if path_str == field_key:
-            return []
-        hashes = "#" * heading_level
-        return [f"{hashes} `{path_str}` — `{nested_cls.__name__}` schema\n", "---\n"]
+        """A heading that introduces the fields of a list/dict item or Union alternative."""
+        text = f"{md_code(path_to_str(item_path))}: {md_code(nested_cls.__name__)} schema"
+        if suffix:
+            text += f" {suffix}"
+        return [md_heading(heading_level, text) + "\n", "---\n"]
 
     def _field_section(
         self,
@@ -119,9 +145,7 @@ class MarkdownDocGenerator:
         fi: Any,
         heading_level: int,
     ) -> list[str]:
-        hashes = "#" * heading_level
-        path_str = container.get_path_str()
-        lines: list[str] = [f"{hashes} `{path_str}`\n"]
+        lines: list[str] = [md_heading(heading_level, md_code(container.get_path_str())) + "\n"]
 
         if fi.title:
             lines.append(f"*{fi.title}*\n")
@@ -142,33 +166,38 @@ class MarkdownDocGenerator:
             if fi.default is None:
                 rows.append(("Default", "`null`"))
             else:
-                rows.append(("Default", f"`{to_json_text(fi.default)}`"))
+                rows.append(("Default", md_code(to_json_text(fi.default))))
 
         enum_vals = container.get_enum_vals()
         if enum_vals:
-            rows.append(("Allowed values", " · ".join(f"`{v}`" for v in enum_vals)))
+            rows.append(("Allowed values", " · ".join(_value_code(v) for v in enum_vals)))
 
         constraints = readable_constraints(fi.metadata)
         if constraints:
-            rows.append(("Constraints", constraints))
+            rows.append(("Constraints", md_code(constraints)))
 
         env_var = container.get_env_var()
         if env_var:
-            env_cell = f"`{env_var}`"
+            notes: list[str] = []
             if container.needs_env_var_null_note():
                 none_str = container.get_env_parse_none_str()
                 if none_str is not None:
-                    env_cell += f" (`{none_str}` sets null)"
+                    notes.append(f"{_value_code(none_str)} sets null")
                 else:
-                    env_cell += " (can not set null, use `null` in the YAML file)"
+                    notes.append("can not set null, use `null` in the YAML file")
+            entry_env_var = container.get_lowercased_dict_entry_env_var()
+            if entry_env_var:
+                notes.append(f"{md_code(entry_env_var)} sets one entry, its key arrives in lower case")
+            env_cell = md_code(env_var)
+            if notes:
+                env_cell += f" ({'; '.join(notes)})"
             rows.append(("Environment variable", env_cell))
 
         if rows:
             lines.append("| Property | Value |")
             lines.append("|---|---|")
             for k, v in rows:
-                v = v.replace("|", "\\|")
-                lines.append(f"| {k} | {v} |")
+                lines.append(f"| {k} | {md_table_cell(v)} |")
             lines.append("")
 
         if fi.examples:

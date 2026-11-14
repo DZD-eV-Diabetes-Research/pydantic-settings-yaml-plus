@@ -1,4 +1,4 @@
-# Configuration Reference — `MyAppConfig`
+# Configuration Reference: `MyAppConfig`
 
 This document is auto-generated from the pydantic-settings model. All settings can be provided via the YAML config file or overridden with environment variables.
 
@@ -142,6 +142,6 @@ database_names:
 |---|---|
 | Type | Dictionary of (str, str) |
 | Required | **Yes** |
-| Environment variable | `APP_INIT_VALUES` |
+| Environment variable | `APP_INIT_VALUES` (`APP_INIT_VALUES__<dict-key>` sets one entry, its key arrives in lower case) |
 
 ---

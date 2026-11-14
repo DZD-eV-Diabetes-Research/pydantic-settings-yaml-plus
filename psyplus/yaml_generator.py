@@ -14,7 +14,7 @@ from ruamel.yaml import YAML, CommentedMap, CommentedSeq
 from ruamel.yaml.scalarstring import SingleQuotedScalarString
 
 from psyplus.field_info import DictKey, FieldInfoContainer, ListIndex, path_to_str, yaml_key
-from psyplus.utils import clean_annotation
+from psyplus.utils import clean_annotation, sequence_item_annotation
 
 log = logging.getLogger(__name__)
 
@@ -257,12 +257,9 @@ class YamlFileGenerator:
         level = len(parent_path)
         result = CommentedSeq()
 
-        # Safely extract item-type annotation from list[T]
-        clean = clean_annotation(annotation) if annotation is not None else None
-        args = get_args(clean) if clean is not None else ()
-        item_annotation = args[0] if args else None
-
         for index, item in enumerate(value):
+            # list[T] has one item type, a fixed-length tuple one per position
+            item_annotation = sequence_item_annotation(annotation, index)
             item_path = parent_path + [ListIndex(index=index)]
             result.append(self._encode_value(item, item_annotation, item_path))
 

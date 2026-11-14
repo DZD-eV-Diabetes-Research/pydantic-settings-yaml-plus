@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import enum
 import json
+import re
 from typing import Annotated, Any, Generator, Literal, Union, cast, get_args, get_origin
 
 from pydantic import (
@@ -103,6 +104,87 @@ def get_literal_list(annotation: Any) -> list[Any] | None:
     return None
 
 
+def is_model_class(annotation: Any) -> bool:
+    return isinstance(annotation, type) and issubclass(annotation, BaseModel)
+
+
+def model_members(annotation: Any) -> list[type[BaseModel]]:
+    """The model classes a field can hold, in declaration order.
+
+    ``Model`` and ``Optional[Model]`` give one class, ``Union[A, B]`` gives every
+    model member (members that are not models, like ``str``, are left out).
+    """
+    cleaned = clean_annotation(annotation)
+    if is_model_class(cleaned):
+        return [cleaned]
+    if not is_union(cleaned):
+        return []
+    members: list[type[BaseModel]] = []
+    for arg in get_args(cleaned):
+        arg = clean_annotation(arg)
+        if is_model_class(arg) and arg not in members:
+            members.append(arg)
+    return members
+
+
+def is_fixed_length_tuple(annotation: Any) -> bool:
+    """True for ``Tuple[int, str]``, False for ``Tuple[int, ...]``, bare ``tuple`` and ``Tuple[()]``."""
+    args = get_args(annotation)
+    return get_origin(annotation) is tuple and bool(args) and args[-1] is not Ellipsis
+
+
+def sequence_item_annotation(annotation: Any, index: int) -> Any:
+    """The annotation of element ``index`` of a list, set or tuple annotation, or None.
+
+    A fixed-length tuple has one annotation per position (``Tuple[int, str]``);
+    every other sequence has the same annotation for all elements.
+    """
+    if annotation is None:
+        return None
+    cleaned = clean_annotation(annotation)
+    args = get_args(cleaned)
+    if is_fixed_length_tuple(cleaned):
+        return args[index] if index < len(args) else None
+    return args[0] if args else None
+
+
+def md_code(text: str) -> str:
+    """Wrap ``text`` in a Markdown inline code span that survives backticks in ``text``.
+
+    CommonMark closes a code span at the first backtick run as long as the opening
+    one, so the fence is one backtick longer than the longest run inside. A space on
+    both sides keeps a leading or trailing backtick apart from the fence; renderers
+    strip that one space again (and would strip it from text that starts and ends
+    with a space, so such text gets the padding as well). Empty text has no code
+    span form, callers show ``""`` instead.
+    """
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    fence = "`" * (longest + 1)
+    if text.startswith("`") or text.endswith("`") or (
+        text.startswith(" ") and text.endswith(" ") and text.strip(" ")
+    ):
+        text = f" {text} "
+    return f"{fence}{text}{fence}"
+
+
+def md_table_cell(text: str) -> str:
+    """Make ``text`` safe as one cell of a GFM table row.
+
+    A ``|`` would end the cell (also inside a code span) and a line break would end
+    the row. Line breaks become spaces, which is also how a code span renders them.
+    """
+    text = text.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")
+    return text.replace("|", "\\|")
+
+
+MD_MAX_HEADING_LEVEL = 6
+
+
+def md_heading(level: int, text: str) -> str:
+    """A Markdown heading, capped at level 6 (``#######`` is not a heading in Markdown)."""
+    return f"{'#' * min(level, MD_MAX_HEADING_LEVEL)} {text}"
+
+
 def python_annotation_to_readable(annotation: Any) -> str | None:
     """Convert a Python type annotation to a human-readable string."""
 
@@ -125,6 +207,11 @@ def python_annotation_to_readable(annotation: Any) -> str | None:
             return annot.__name__
 
         origin = get_origin(annot)
+
+        if is_fixed_length_tuple(annot):
+            items = [_stringify(a) or "any" for a in get_args(annot)]
+            count = f"exactly {len(items)} item" + ("s" if len(items) != 1 else "")
+            return f"List of {count} ({', '.join(items)})"
 
         if origin in (list, set, frozenset, tuple) or annot in (list, set, frozenset, tuple):
             args = tuple(a for a in get_args(annot) if a is not Ellipsis)

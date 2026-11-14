@@ -296,3 +296,90 @@ class TestGetStrDictAsTable:
         result = get_str_dict_as_table(d)
         assert "line1" in result
         assert "line2" in result
+
+
+# ---------------------------------------------------------------------------
+# Tuples, model members, Markdown helpers
+# ---------------------------------------------------------------------------
+
+class TestTupleTypes:
+    def test_fixed_length_tuple_shows_each_position(self):
+        assert python_annotation_to_readable(Tuple[int, str]) == "List of exactly 2 items (int, str)"
+        assert python_annotation_to_readable(tuple[bool]) == "List of exactly 1 item (bool)"
+        assert (
+            python_annotation_to_readable(Optional[Tuple[int, Any]])
+            == "List of exactly 2 items (int, any)"
+        )
+
+    def test_variable_length_tuple_reads_as_list(self):
+        assert python_annotation_to_readable(Tuple[int, ...]) == "List of int"
+        assert python_annotation_to_readable(tuple) == "List"
+
+    def test_sequence_item_annotation(self):
+        from psyplus.utils import sequence_item_annotation
+
+        assert sequence_item_annotation(Tuple[int, str], 0) is int
+        assert sequence_item_annotation(Tuple[int, str], 1) is str
+        assert sequence_item_annotation(Tuple[int, str], 2) is None
+        assert sequence_item_annotation(Optional[Tuple[int, str]], 1) is str
+        assert sequence_item_annotation(Tuple[int, ...], 5) is int
+        assert sequence_item_annotation(List[str], 3) is str
+        assert sequence_item_annotation(list, 0) is None
+        assert sequence_item_annotation(None, 0) is None
+
+
+class TestModelMembers:
+    def test_model_members(self):
+        from psyplus.utils import model_members
+
+        class A(BaseModel):
+            x: int = 1
+
+        class B(BaseModel):
+            y: int = 1
+
+        assert model_members(A) == [A]
+        assert model_members(Optional[A]) == [A]
+        assert model_members(Union[A, B]) == [A, B]
+        assert model_members(Optional[Union[A, str, B]]) == [A, B]
+        assert model_members(Annotated[Union[A, B], Field(description="x")]) == [A, B]
+        assert model_members(Union[int, str]) == []
+        assert model_members(List[A]) == []
+
+
+class TestMarkdownHelpers:
+    def test_md_code_plain(self):
+        from psyplus.utils import md_code
+
+        assert md_code("abc") == "`abc`"
+
+    def test_md_code_fence_is_longer_than_any_backtick_run(self):
+        from psyplus.utils import md_code
+
+        assert md_code("a`b") == "``a`b``"
+        assert md_code("a``b`c") == "```a``b`c```"
+
+    def test_md_code_pads_leading_or_trailing_backtick(self):
+        from psyplus.utils import md_code
+
+        assert md_code("`q`") == "`` `q` ``"
+        assert md_code("q`") == "`` q` ``"
+
+    def test_md_code_keeps_spaces_that_renderers_would_strip(self):
+        from psyplus.utils import md_code
+
+        assert md_code(" a ") == "`  a  `"
+        assert md_code(" a") == "` a`"
+        assert md_code("  ") == "`  `"
+
+    def test_md_table_cell(self):
+        from psyplus.utils import md_table_cell
+
+        assert md_table_cell("`a|b`") == "`a\\|b`"
+        assert md_table_cell("a\nb\r\nc") == "a b c"
+
+    def test_md_heading_is_capped_at_level_six(self):
+        from psyplus.utils import md_heading
+
+        assert md_heading(2, "x") == "## x"
+        assert md_heading(9, "x") == "###### x"

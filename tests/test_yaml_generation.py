@@ -297,3 +297,69 @@ class TestValueEncoding:
         raw, _ = _generate(M)
         entry = raw.split("# ## team ###", 1)[1]
         assert "Required:  False" in entry.split("team:", 1)[0]
+
+
+class TestTupleElementComments:
+    def _element_types(self, raw: str, path: str) -> list[str]:
+        out = []
+        for block in raw.split(f"# YAML-path: {path}[")[1:]:
+            out.append(block.split("# Type:", 1)[1].split("\n", 1)[0].strip())
+        return out
+
+    def test_fixed_length_tuple_elements_have_their_own_type(self):
+        from typing import Tuple
+
+        from pydantic_settings import BaseSettings
+
+        class M(BaseSettings):
+            pair: Tuple[int, str] = (1, "a")
+            many: Tuple[int, ...] = (1, 2)
+
+        raw, parsed = _generate(M)
+        assert parsed == {"pair": [1, "a"], "many": [1, 2]}
+        assert "# Type:     List of exactly 2 items (int, str)" in raw
+        assert self._element_types(raw, "pair") == ["int", "str"]
+        assert self._element_types(raw, "many") == ["int", "int"]
+
+
+class TestDictKeyCaseNote:
+    def test_dict_field_comment_has_the_note(self):
+        raw, _ = _generate(MultiNestedModel)
+        assert (
+            "# Env-var:  'MULTI_SERVER_MAP'\n"
+            "#           'MULTI_SERVER_MAP__<dict-key>' sets one entry, its key arrives in lower case"
+        ) in raw
+        assert raw.count("lower case") == 1
+
+
+class TestNullUnionOfModels:
+    def test_sub_field_env_vars_of_every_member_are_listed_once(self):
+        from typing import Literal, Optional, Union
+
+        from pydantic import BaseModel
+        from pydantic_settings import BaseSettings, SettingsConfigDict
+
+        class Cat(BaseModel):
+            kind: Literal["cat"] = "cat"
+            lives: int = 9
+
+        class Dog(BaseModel):
+            kind: Literal["dog"] = "dog"
+            bark: str = "woof"
+
+        class M(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="APP_", env_nested_delimiter="__")
+            pet: Union[Cat, Dog]
+            maybe_pet: Optional[Union[Cat, Dog]] = None
+
+        raw, parsed = _generate(M)
+        assert parsed == {"pet": None, "maybe_pet": None}
+        for field in ("pet", "maybe_pet"):
+            env = field.upper()
+            assert (
+                "# Env-vars of the sub-fields:\n"
+                f"#   {field}.kind: 'APP_{env}__KIND'\n"
+                f"#   {field}.lives: 'APP_{env}__LIVES'\n"
+                f"#   {field}.bark: 'APP_{env}__BARK'\n"
+                f"{field}:"
+            ) in raw

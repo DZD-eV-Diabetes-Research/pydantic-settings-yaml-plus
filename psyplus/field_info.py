@@ -3,9 +3,8 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, get_origin
 
-from pydantic import BaseModel
 from pydantic import fields as pydantic_fields
 from pydantic_core import PydanticUndefined
 from pydantic_settings import BaseSettings
@@ -16,6 +15,7 @@ from psyplus.utils import (
     get_str_dict_as_table,
     has_literal,
     is_nullable,
+    model_members,
     python_annotation_to_readable,
     readable_constraints,
     to_json_text,
@@ -24,7 +24,6 @@ from psyplus.utils import (
 
 log = logging.getLogger(__name__)
 
-ENV_VAR_LISTINDEX_PLACEHOLDER = "<list-index>"
 ENV_VAR_DICTKEY_PLACEHOLDER = "<dict-key>"
 # Stands for "any element" in a path, e.g. ``servers[*].host`` in the Markdown doc.
 ANY_ITEM = "*"
@@ -127,6 +126,24 @@ class FieldInfoContainer:
                 parts.append(ENV_VAR_DICTKEY_PLACEHOLDER)
         return prefix + delimiter.join(parts)
 
+    def get_lowercased_dict_entry_env_var(self) -> str | None:
+        """For a dict field: the env var of one entry (``APP_MAP__<dict-key>``) when
+        pydantic-settings lowercases its key, else None.
+
+        Unless the model sets ``case_sensitive=True``, pydantic-settings lowercases env
+        var names before it splits them, so ``APP_MAP__Second__SIZE`` creates the key
+        ``second``. Keys in the JSON value of ``APP_MAP`` keep their case.
+        """
+        config = self.root_settings_class.model_config
+        delimiter = config.get("env_nested_delimiter")
+        if config.get("case_sensitive", False) or not delimiter:
+            return None
+        annotation = clean_annotation(self.get_annotation())
+        if not (annotation is dict or get_origin(annotation) is dict):
+            return None
+        env_var = self.get_env_var()
+        return env_var + delimiter + ENV_VAR_DICTKEY_PLACEHOLDER if env_var else None
+
     def get_path_str(self) -> str:
         return path_to_str(self.path)
 
@@ -161,31 +178,32 @@ class FieldInfoContainer:
     def get_sub_field_env_vars(self) -> list[tuple[str, str]]:
         """``(path, env var)`` for the fields of this field's sub-model, recursively.
 
-        Only direct sub-models are followed (``Optional[Model]`` included); fields
-        without an env var of their own (list elements, no ``env_nested_delimiter``)
-        are left out.
+        Only direct sub-models are followed (``Optional[Model]`` included). For a
+        Union of models the fields of every member are listed, each path once.
+        Fields without an env var of their own (list elements, no
+        ``env_nested_delimiter``) are left out.
         """
-        out: list[tuple[str, str]] = []
+        out: dict[str, str] = {}
 
         def walk(container: FieldInfoContainer, seen: tuple[type, ...]) -> None:
-            cls = clean_annotation(container.get_annotation())
-            if not (isinstance(cls, type) and issubclass(cls, BaseModel)) or cls in seen:
-                return
-            for name, fi in cls.model_fields.items():
-                key = yaml_key(name, fi)
-                child = FieldInfoContainer(
-                    path=container.path + [key],
-                    field_name=key,
-                    field_info=fi,
-                    root_settings_class=self.root_settings_class,
-                )
-                env_var = child.get_env_var()
-                if env_var:
-                    out.append((child.get_path_str(), env_var))
-                walk(child, seen + (cls,))
+            for cls in model_members(container.get_annotation()):
+                if cls in seen:
+                    continue
+                for name, fi in cls.model_fields.items():
+                    key = yaml_key(name, fi)
+                    child = FieldInfoContainer(
+                        path=container.path + [key],
+                        field_name=key,
+                        field_info=fi,
+                        root_settings_class=self.root_settings_class,
+                    )
+                    env_var = child.get_env_var()
+                    if env_var:
+                        out.setdefault(child.get_path_str(), env_var)
+                    walk(child, seen + (cls,))
 
         walk(self, ())
-        return out
+        return list(out.items())
 
     def build_comment_lines(
         self,
@@ -242,6 +260,9 @@ class FieldInfoContainer:
                     data["Env-var:"] += f" ('{none_str}' sets null)"
                 else:
                     data["Env-var:"] += " (can not set null, use null in the YAML file)"
+            entry_env_var = self.get_lowercased_dict_entry_env_var()
+            if entry_env_var:
+                data["Env-var:"] += f"\n'{entry_env_var}' sets one entry, its key arrives in lower case"
 
         if fi.description:
             data["Description:"] = fi.description

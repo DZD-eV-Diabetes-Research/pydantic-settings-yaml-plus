@@ -1,9 +1,9 @@
 """Tests for psyplus/markdown_generator.py — MarkdownDocGenerator."""
-from typing import List
+from typing import Dict, List, Literal, Optional, Union
 
 import pytest
 from pydantic import BaseModel, Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from psyplus.markdown_generator import MarkdownDocGenerator
 from tests.models.simple import SimpleModel
@@ -205,3 +205,169 @@ class TestMarkdownEdgeCases:
 
         doc = _generate(Piped)
         assert '`"a\\|b"`' in doc
+
+
+# ---------------------------------------------------------------------------
+# Union of models, inline code, heading depth, dict keys from env vars
+# ---------------------------------------------------------------------------
+
+class _Cat(BaseModel):
+    kind: Literal["cat"] = "cat"
+    lives: int = 9
+
+
+class _Dog(BaseModel):
+    kind: Literal["dog"] = "dog"
+    bark: str = "woof"
+
+
+class _Pets(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="PETS_", env_nested_delimiter="__")
+
+    pet: Union[_Cat, _Dog] = _Cat()
+    maybe_pet: Optional[Union[_Cat, _Dog]] = None
+    pets: List[Union[_Cat, _Dog]] = []
+    pet_map: Dict[str, Union[_Cat, _Dog]] = {}
+
+
+class _L6(BaseModel):
+    v: int = 1
+
+
+class _L5(BaseModel):
+    l6: _L6 = _L6()
+
+
+class _L4(BaseModel):
+    l5: _L5 = _L5()
+
+
+class _L3(BaseModel):
+    l4: _L4 = _L4()
+
+
+class _L2(BaseModel):
+    l3: _L3 = _L3()
+
+
+class _L1(BaseModel):
+    l2: _L2 = _L2()
+
+
+def _headings(doc: str) -> list[str]:
+    return [line for line in doc.splitlines() if line.startswith("#")]
+
+
+def _table_rows(doc: str, path: str) -> list[str]:
+    section = doc.split(f"`{path}`\n", 1)[1].split("\n---", 1)[0]
+    return [line for line in section.splitlines() if line.startswith("|")]
+
+
+class TestMarkdownUnionOfModels:
+    def test_each_alternative_has_its_own_section(self):
+        doc = _generate(_Pets)
+        assert "### `pet`: `_Cat` schema (option 1 of 2)" in doc
+        assert "### `pet`: `_Dog` schema (option 2 of 2)" in doc
+
+    def test_fields_of_every_alternative_are_documented(self):
+        doc = _generate(_Pets)
+        assert "#### `pet.lives`" in doc
+        assert "#### `pet.bark`" in doc
+        assert "`PETS_PET__BARK`" in doc
+
+    def test_alternative_fields_come_after_their_own_heading(self):
+        doc = _generate(_Pets)
+        dog = doc.index("`_Dog` schema (option 2 of 2)")
+        assert doc.index("#### `pet.lives`") < dog < doc.index("#### `pet.bark`")
+
+    def test_optional_union_is_expanded(self):
+        doc = _generate(_Pets)
+        assert "`maybe_pet.bark`" in doc
+        assert "`maybe_pet.lives`" in doc
+
+    def test_list_and_dict_of_union_are_expanded(self):
+        doc = _generate(_Pets)
+        assert "`pets[*]`: `_Dog` schema (option 2 of 2)" in doc
+        assert "`pets[*].bark`" in doc
+        assert "`pet_map[*].bark`" in doc
+        assert "`PETS_PET_MAP__<dict-key>__BARK`" in doc
+
+    def test_single_model_keeps_plain_layout(self):
+        doc = _generate(NestedModel)
+        assert "option 1" not in doc
+        assert "### `database.host`" in doc
+
+
+class TestMarkdownInlineCode:
+    def test_backtick_in_default_gets_a_longer_fence(self):
+        class Ticks(BaseSettings):
+            tick: str = "a`b"
+
+        doc = _generate(Ticks)
+        assert '| Default | ``"a`b"`` |' in doc
+
+    def test_value_that_starts_with_backtick_is_padded(self):
+        class Ticks(BaseSettings):
+            quoted: Literal["`q`", "plain"] = "plain"
+
+        doc = _generate(Ticks)
+        assert "| Allowed values | `` `q` `` · `plain` |" in doc
+
+    def test_pipe_and_line_break_stay_inside_the_cell(self):
+        class Odd(BaseSettings):
+            odd: Literal["x|y", "a\nb"] = "x|y"
+
+        doc = _generate(Odd)
+        rows = _table_rows(doc, "odd")
+        assert '| Allowed values | `x\\|y` · `"a\\nb"` |' in rows
+        assert all(row.endswith("|") for row in rows)
+
+    def test_constraints_are_code(self):
+        class Pattern(BaseSettings):
+            pat: str = Field(default="a", pattern=r"^a*`b|c$")
+
+        doc = _generate(Pattern)
+        assert "| Constraints | ``pattern='^a*`b\\|c$'`` |" in doc
+
+
+class TestMarkdownHeadingDepth:
+    def test_headings_stop_at_level_six(self):
+        class Deep(BaseSettings):
+            deep: _L1 = _L1()
+
+        doc = _generate(Deep)
+        assert not any(h.startswith("#######") for h in _headings(doc))
+        assert "###### `deep.l2.l3.l4.l5`" in doc
+        assert "###### `deep.l2.l3.l4.l5.l6.v`" in doc
+
+    def test_nested_model_gets_no_extra_schema_heading(self):
+        class Deep(BaseSettings):
+            deep: _L1 = _L1()
+
+        doc = _generate(Deep)
+        assert "schema" not in doc
+
+
+class TestMarkdownDictKeyCase:
+    def test_dict_field_gets_the_lower_case_note(self):
+        doc = _generate(MultiNestedModel)
+        assert (
+            "| Environment variable | `MULTI_SERVER_MAP` (`MULTI_SERVER_MAP__<dict-key>` "
+            "sets one entry, its key arrives in lower case) |"
+        ) in _table_rows(doc, "server_map")
+        assert doc.count("lower case") == 1
+
+    def test_no_note_when_case_sensitive(self):
+        class Sensitive(BaseSettings):
+            model_config = SettingsConfigDict(
+                env_prefix="S_", env_nested_delimiter="__", case_sensitive=True
+            )
+            labels: Dict[str, str] = {}
+
+        doc = _generate(Sensitive)
+        assert "`S_labels`" in doc
+        assert "lower case" not in doc
+
+    def test_no_note_for_fields_outside_dicts(self):
+        doc = _generate(NestedModel)
+        assert "lower case" not in doc

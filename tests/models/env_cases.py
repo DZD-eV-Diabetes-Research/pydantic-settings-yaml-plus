@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from typing import Annotated, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, AliasPath, BaseModel, ConfigDict, Field
+from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -96,3 +97,81 @@ class MaxSplit(BaseSettings):
         env_prefix="APP_", env_nested_delimiter="_", env_nested_max_split=1
     )
     generation: LlmCfg = LlmCfg()
+
+
+# --- aliases: the YAML key and the env var name are the validation alias ---
+class AliasSub(BaseModel):
+    sub_field: str = Field("d", alias="subAlias")
+    plain: int = 1
+    choice_field: str = Field("c", validation_alias=AliasChoices("subChoice", "sub_choice_2"))
+
+
+class AliasItem(BaseModel):
+    item_name: str = Field("n", alias="itemName")
+    size: int = Field(1, alias="item_size")
+
+
+class Aliases(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="APP_", env_nested_delimiter="__")
+    my_field: str = Field("x", alias="MY_ALIAS")
+    v_field: int = Field(1, validation_alias="V_ALIAS")
+    c_field: str = Field("x", validation_alias=AliasChoices("C_ONE", "C_TWO"))
+    cp_field: str = Field("x", validation_alias=AliasChoices(AliasPath("o", "i"), "C_STR"))
+    p_field: str = Field("x", validation_alias=AliasPath("outer", "inner"))
+    s_field: str = Field("x", serialization_alias="SER")
+    plain: str = "p"
+    sub: AliasSub = AliasSub()
+    asub: AliasSub = Field(AliasSub(), alias="theSub")
+    opt_sub: Optional[AliasSub] = AliasSub()
+    items: List[AliasItem] = [AliasItem()]
+    item_map: Dict[str, AliasItem] = {"first": AliasItem()}
+    required_field: str = Field(alias="REQ")
+
+
+class AliasesPrefixAlias(Aliases):
+    model_config = SettingsConfigDict(env_prefix_target="alias")
+
+
+class AliasesPrefixAll(Aliases):
+    model_config = SettingsConfigDict(env_prefix_target="all")
+
+
+class AliasesCaseSens(Aliases):
+    model_config = SettingsConfigDict(case_sensitive=True)
+
+
+class AliasesByName(Aliases):
+    model_config = SettingsConfigDict(populate_by_name=True)
+
+
+# --- alias_generator: every field gets a camelCase alias ------------------
+class CamelLeaf(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel)
+    inner_value: str = "d"
+    count: int = 1
+
+
+class CamelMid(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel)
+    mid_value: str = "m"
+    leaf_model: CamelLeaf = CamelLeaf()
+    opt_leaf: Optional[CamelLeaf] = CamelLeaf()
+
+
+class Camel(BaseSettings):
+    model_config = SettingsConfigDict(
+        alias_generator=to_camel, env_prefix="APP_", env_nested_delimiter="__"
+    )
+    log_level: str = "INFO"
+    port: int = 8080
+    mid_model: CamelMid = CamelMid()
+    leaves: List[CamelLeaf] = [CamelLeaf()]
+    leaf_map: Dict[str, CamelLeaf] = {"k": CamelLeaf()}
+
+
+class CamelPrefixAll(Camel):
+    model_config = SettingsConfigDict(env_prefix_target="all")
+
+
+class CamelCaseSens(Camel):
+    model_config = SettingsConfigDict(case_sensitive=True)

@@ -7,7 +7,16 @@ from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
 from pydantic_settings import BaseSettings
 
-from psyplus.field_info import ANY_ITEM, DictKey, FieldInfoContainer, ListIndex, path_to_str, yaml_key
+from psyplus.field_info import (
+    ANY_ITEM,
+    DictKey,
+    FieldInfoContainer,
+    ListIndex,
+    key_name,
+    path_to_str,
+    yaml_key_path,
+    yaml_keyed,
+)
 from psyplus.utils import (
     clean_annotation,
     md_code,
@@ -61,11 +70,11 @@ class MarkdownDocGenerator:
     ) -> None:
         _seen = _seen + (cls,)
         for name, fi in cls.model_fields.items():
-            key = yaml_key(name, fi)
-            path = parent_path + [key]
+            key_path = yaml_key_path(cls, name, fi)
+            path = parent_path + key_path
             container = FieldInfoContainer(
                 path=path,
-                field_name=key,
+                field_name=key_name(key_path),
                 field_info=fi,
                 root_settings_class=self.settings_class,
             )
@@ -75,7 +84,7 @@ class MarkdownDocGenerator:
             annotation = clean_annotation(fi.annotation) if fi.annotation else None
             if not annotation:
                 continue
-            models, item_path = self._extract_nested(annotation, parent_path, key)
+            models, item_path = self._extract_nested(annotation, path)
             for number, nested_cls in enumerate(models, start=1):
                 if nested_cls in _seen:
                     continue
@@ -94,8 +103,7 @@ class MarkdownDocGenerator:
     def _extract_nested(
         self,
         annotation: Any,
-        parent_path: list[str | ListIndex | DictKey],
-        key: str,
+        path: list[str | ListIndex | DictKey],
     ) -> tuple[list[type[BaseModel]], list[str | ListIndex | DictKey]]:
         """Return (nested model classes, path to use as parent), or ([], []).
 
@@ -105,8 +113,6 @@ class MarkdownDocGenerator:
           - ``List[Model]``: the path is appended with ``key[*]``
           - ``Dict[K, Model]``: the path is appended with ``key[*]``
         """
-        path = parent_path + [key]
-
         models = model_members(annotation)
         if models:
             return models, path
@@ -166,7 +172,7 @@ class MarkdownDocGenerator:
             if fi.default is None:
                 rows.append(("Default", "`null`"))
             else:
-                rows.append(("Default", md_code(to_json_text(fi.default))))
+                rows.append(("Default", md_code(to_json_text(yaml_keyed(fi.default)))))
 
         enum_vals = container.get_enum_vals()
         if enum_vals:
@@ -206,7 +212,7 @@ class MarkdownDocGenerator:
                 if len(fi.examples) > 1:
                     lines.append(f"*Example {i + 1}:*\n")
                 try:
-                    as_yaml = to_yaml_text({container.field_name: example})
+                    as_yaml = to_yaml_text({container.field_name: yaml_keyed(example)})
                     lines.append(f"```yaml\n{as_yaml.rstrip()}\n```\n")
                 except Exception:
                     lines.append(f"```\n{repr(example)}\n```\n")

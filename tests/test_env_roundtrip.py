@@ -16,6 +16,7 @@ from unittest import mock
 
 import pytest
 import yaml
+from pydantic import AliasChoices
 
 from psyplus import YamlSettingsPlus
 from psyplus.utils import clean_annotation, get_literal_list
@@ -31,6 +32,14 @@ MODELS = [
     cases.NoDelim,
     cases.CaseSens,
     cases.MaxSplit,
+    cases.Aliases,
+    cases.AliasesPrefixAlias,
+    cases.AliasesPrefixAll,
+    cases.AliasesCaseSens,
+    cases.AliasesByName,
+    cases.Camel,
+    cases.CamelPrefixAll,
+    cases.CamelCaseSens,
     NestedModel,
     MultiNestedModel,
     MyAppConfig,
@@ -39,6 +48,16 @@ MODELS = [
 # The template leaves required values without a default empty (null), so it does not
 # load untouched. These fill them in; fill_required() checks each replaces a null.
 REQUIRED_VALUES = {
+    **{
+        model: {"REQ": "r"}
+        for model in (
+            cases.Aliases,
+            cases.AliasesPrefixAlias,
+            cases.AliasesPrefixAll,
+            cases.AliasesCaseSens,
+            cases.AliasesByName,
+        )
+    },
     NestedModel: {"admin_password": "pw", "database": {"name": "db"}},
     MyAppConfig: {
         "admin_pw": "pw",
@@ -120,12 +139,26 @@ def resolve(data, segments):
     return cur, concrete
 
 
+def field_name(model_cls, key):
+    """The name of the field of *model_cls* whose YAML key is *key*, or None.
+
+    The key is the validation alias (of ``AliasChoices`` the first str), else the name.
+    """
+    for name, fi in getattr(model_cls, "model_fields", {}).items():
+        alias = fi.validation_alias
+        if isinstance(alias, AliasChoices):
+            alias = next((c for c in alias.choices if isinstance(c, str)), None)
+        if (alias if isinstance(alias, str) else name) == key:
+            return name
+    return None
+
+
 def get_attr_path(obj, segments):
     for seg in segments:
         if isinstance(seg, int) or isinstance(obj, dict):
             obj = obj[seg]
         else:
-            obj = getattr(obj, seg)
+            obj = getattr(obj, field_name(type(obj), seg))
     return obj
 
 
@@ -144,9 +177,9 @@ def annotation_at(model, prefix):
                 else (cleaned,)
             )
             ann = next(
-                m.model_fields[seg].annotation
+                m.model_fields[field_name(m, seg)].annotation
                 for m in members
-                if seg in getattr(m, "model_fields", {})
+                if field_name(m, seg) is not None
             )
     return ann
 
@@ -172,8 +205,15 @@ def is_dict_key(model, prefix) -> bool:
 def collect():
     params = []
     for model in MODELS:
-        template = yaml.safe_load(YamlSettingsPlus(model).render_yaml())
-        fill_required(template, REQUIRED_VALUES.get(model, {}))
+        try:
+            template = yaml.safe_load(YamlSettingsPlus(model).render_yaml())
+            fill_required(template, REQUIRED_VALUES.get(model, {}))
+        except Exception as e:  # noqa: BLE001
+            # Fail this model's test instead of the collection of all models.
+            params.append(
+                pytest.param(model, "template", "", "", None, [], e, id=f"{model.__name__}-template")
+            )
+            continue
         names = [("yaml", p, n) for p, n in yaml_env_names(model).items()]
         names += [("md", p, n) for p, n in md_env_names(model).items()]
         for source, path, env in names:
@@ -196,6 +236,8 @@ def collect():
 def test_documented_env_var_sets_value(
     model, source, path, env, template, concrete, value, tmp_path
 ):
+    if source == "template":
+        pytest.fail(f"the template of {model.__name__} can not be filled in: {value!r}")
     # Each <dict-key> placeholder becomes the concrete key of this element.
     keys = iter(
         [s for i, s in enumerate(concrete) if isinstance(s, str) and is_dict_key(model, concrete[:i])]

@@ -1,4 +1,4 @@
-"""Tests for psyplus/main.py — YamlSettingsPlus integration."""
+"""Tests for psyplus/main.py: YamlSettingsPlus integration."""
 import os
 import pickle
 

@@ -52,9 +52,9 @@ class YamlSettingsPlus(Generic[SettingsT]):
 
         Args:
             on_exists: What to do when the file already exists.
-                - ``"skip"``      — silently do nothing (default, safe for init scripts).
-                - ``"overwrite"`` — replace the existing file.
-                - ``"error"``     — raise ``FileExistsError``.
+                - ``"skip"``: silently do nothing (default, safe for init scripts).
+                - ``"overwrite"``: replace the existing file.
+                - ``"error"``: raise ``FileExistsError``.
         """
         if self.config_file is None:
             raise ValueError("file_path must be set to generate a config file.")

@@ -1,4 +1,4 @@
-"""The exact model from the README — used in integration tests."""
+"""The exact model from the README, used in integration tests."""
 from pathlib import Path, PurePath
 from typing import Annotated, Dict, List, Literal, Optional
 

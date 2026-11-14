@@ -1,4 +1,4 @@
-"""Tests for psyplus/field_info.py — FieldInfoContainer."""
+"""Tests for psyplus/field_info.py: FieldInfoContainer."""
 from typing import Annotated, Dict, List, Literal, Optional, Set, Tuple
 
 import pytest

@@ -1,4 +1,4 @@
-"""Flat settings model used in tests — covers basic scalar types and field metadata."""
+"""Flat settings model used in tests. Covers basic scalar types and field metadata."""
 from typing import Annotated, Dict, List, Literal, Optional
 
 from pydantic import Field
@@ -16,8 +16,8 @@ class SimpleModel(BaseSettings):
     literal_field: Literal["A", "B", "C"] = "A"
     string_list: List[str] = ["x", "y"]
     string_dict: Dict[str, int] = {"one": 1}
-    required_string: str  # required — no default
-    required_list: List[str]  # required — no default
+    required_string: str  # required, no default
+    required_list: List[str]  # required, no default
     fully_documented: Annotated[
         Optional[str],
         Field(

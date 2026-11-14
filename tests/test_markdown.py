@@ -1,4 +1,4 @@
-"""Tests for psyplus/markdown_generator.py — MarkdownDocGenerator."""
+"""Tests for psyplus/markdown_generator.py: MarkdownDocGenerator."""
 from typing import Dict, List, Literal, Optional, Union
 
 import pytest

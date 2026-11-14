@@ -142,6 +142,6 @@ database_names:
 |---|---|
 | Type | Dictionary of (str, str) |
 | Required | **Yes** |
-| Environment variable | `APP_INIT_VALUES` |
+| Environment variable | `APP_INIT_VALUES` (`APP_INIT_VALUES__<dict-key>` sets one entry, its key arrives in lower case) |
 
 ---

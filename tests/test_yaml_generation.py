@@ -297,3 +297,36 @@ class TestValueEncoding:
         raw, _ = _generate(M)
         entry = raw.split("# ## team ###", 1)[1]
         assert "Required:  False" in entry.split("team:", 1)[0]
+
+
+class TestTupleElementComments:
+    def _element_types(self, raw: str, path: str) -> list[str]:
+        out = []
+        for block in raw.split(f"# YAML-path: {path}[")[1:]:
+            out.append(block.split("# Type:", 1)[1].split("\n", 1)[0].strip())
+        return out
+
+    def test_fixed_length_tuple_elements_have_their_own_type(self):
+        from typing import Tuple
+
+        from pydantic_settings import BaseSettings
+
+        class M(BaseSettings):
+            pair: Tuple[int, str] = (1, "a")
+            many: Tuple[int, ...] = (1, 2)
+
+        raw, parsed = _generate(M)
+        assert parsed == {"pair": [1, "a"], "many": [1, 2]}
+        assert "# Type:     List of exactly 2 items (int, str)" in raw
+        assert self._element_types(raw, "pair") == ["int", "str"]
+        assert self._element_types(raw, "many") == ["int", "int"]
+
+
+class TestDictKeyCaseNote:
+    def test_dict_field_comment_has_the_note(self):
+        raw, _ = _generate(MultiNestedModel)
+        assert (
+            "# Env-var:  'MULTI_SERVER_MAP'\n"
+            "#           'MULTI_SERVER_MAP__<dict-key>' sets one entry, its key arrives in lower case"
+        ) in raw
+        assert raw.count("lower case") == 1

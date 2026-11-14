@@ -1,5 +1,5 @@
 """Tests for psyplus/field_info.py — FieldInfoContainer."""
-from typing import Annotated, List, Literal, Optional
+from typing import Annotated, Dict, List, Literal, Optional
 
 import pytest
 from pydantic import Field
@@ -292,3 +292,60 @@ class TestBuildCommentLines:
         comment = "\n".join(self._make(fi).build_comment_lines())
         # When key == path there should be no YAML-path row
         assert "YAML-path:" not in comment
+
+
+# ---------------------------------------------------------------------------
+# Dict keys from env var names arrive in lower case
+# ---------------------------------------------------------------------------
+
+class TestDictEntryEnvVar:
+    def _container(self, root, path, annotation):
+        return FieldInfoContainer(
+            path=path,
+            field_name=str(path[-1]),
+            root_settings_class=root,
+            field_info=FieldInfo(annotation=annotation, default={}),
+        )
+
+    def test_dict_field_names_the_entry_env_var(self):
+        c = self._container(RootModel, ["labels"], Optional[Dict[str, str]])
+        assert c.get_lowercased_dict_entry_env_var() == "MY_LABELS__<dict-key>"
+
+    def test_dict_field_below_a_dict_entry(self):
+        c = self._container(RootModel, ["groups", DictKey(key="*"), "labels"], Dict[str, str])
+        assert c.get_lowercased_dict_entry_env_var() == "MY_GROUPS__<dict-key>__LABELS__<dict-key>"
+
+    def test_none_for_other_fields(self):
+        assert self._container(RootModel, ["name"], str).get_lowercased_dict_entry_env_var() is None
+        entry = self._container(RootModel, ["servers", DictKey(key="*"), "host"], str)
+        assert entry.get_lowercased_dict_entry_env_var() is None
+        listed = self._container(RootModel, ["items", ListIndex(index=0)], Dict[str, str])
+        assert listed.get_lowercased_dict_entry_env_var() is None
+
+    def test_none_when_case_sensitive(self):
+        class Sensitive(BaseSettings):
+            model_config = SettingsConfigDict(env_nested_delimiter="__", case_sensitive=True)
+
+        c = self._container(Sensitive, ["labels"], Dict[str, str])
+        assert c.get_lowercased_dict_entry_env_var() is None
+
+    def test_none_without_delimiter(self):
+        class NoDelim(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="ND_")
+
+        c = self._container(NoDelim, ["labels"], Dict[str, str])
+        assert c.get_lowercased_dict_entry_env_var() is None
+
+    def test_yaml_comment_has_the_note_on_its_own_line(self):
+        lines = self._container(RootModel, ["labels"], Dict[str, str]).build_comment_lines()
+        env_line = next(i for i, line in enumerate(lines) if line.startswith("Env-var:"))
+        assert lines[env_line].endswith("'MY_LABELS'")
+        assert lines[env_line + 1].strip() == (
+            "'MY_LABELS__<dict-key>' sets one entry, its key arrives in lower case"
+        )
+
+
+def test_unused_list_index_placeholder_is_gone():
+    import psyplus.field_info
+
+    assert not hasattr(psyplus.field_info, "ENV_VAR_LISTINDEX_PLACEHOLDER")

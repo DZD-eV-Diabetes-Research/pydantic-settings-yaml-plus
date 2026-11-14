@@ -124,7 +124,7 @@ A fully documented optional string field.
 | Type | str or null |
 | Required | No |
 | Default | `"default_value"` |
-| Constraints | MaxLen(max_length=100) |
+| Constraints | `MaxLen(max_length=100)` |
 | Environment variable | `SIMPLE_FULLY_DOCUMENTED` (can not set null, use `null` in the YAML file) |
 
 **Examples:**

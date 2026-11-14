@@ -288,6 +288,11 @@ md = YamlSettingsPlus(MyAppConfig).render_markdown()
 
 Both produce a document with a property table for every field: type, required flag, default, allowed values, environment variable, description, and examples.
 
+The fields of a nested model get their own sections, headed by their full path (`database.host`,
+`servers[*].port`). A field that holds one of several models (`Union[Cat, Dog]`) gets one section
+per model, labelled `option 1 of 2` and so on. Markdown has no headings below level 6, so deeper
+fields stay at level 6 and the path in the heading shows where they belong.
+
 ---
 
 ## Example gallery
@@ -396,7 +401,7 @@ What pydantic-settings can set through env vars, and what the generated files sh
 | Field of a nested model, any depth | `MYAPP_DATABASE__SERVER__HOST=db` | Sets only this value. The other values from the YAML file stay. |
 | Whole nested model | `MYAPP_DATABASE='{"name": "x"}'` | JSON, merged into the values from the YAML file. |
 | List (`List[str]`, `List[SubModel]`) | `MYAPP_HOSTS='["a", "b"]'` | JSON, replaces the whole list. A single list element (`MYAPP_HOSTS__0`) can not be set, so list elements show no env var. |
-| Dict value (`Dict[str, ...]`) | `MYAPP_LABELS__team=core` | `<dict-key>` stands for the key. Env var names are case-insensitive by default, so the key arrives in lower case. |
+| Dict value (`Dict[str, ...]`) | `MYAPP_LABELS__team=core` | `<dict-key>` stands for the key. Env var names are case-insensitive by default, so the key arrives in lower case, and the generated files say so next to the env var of the dict field. Keys in a JSON value keep their case. |
 
 Only the root model's `env_prefix` and `env_nested_delimiter` count. A nested `BaseSettings`
 sub-model's own `env_prefix` is not used for its fields. Without `env_nested_delimiter`, nested

@@ -45,7 +45,7 @@ This document is auto-generated from the pydantic-settings model. All settings c
 | Type | Dictionary of (str, Object (ServerItem)) |
 | Required | No |
 | Default | `{"primary": {"host": "primary.example.com", "port": 443}}` |
-| Environment variable | `MULTI_SERVER_MAP` |
+| Environment variable | `MULTI_SERVER_MAP` (`MULTI_SERVER_MAP__<dict-key>` sets one entry, its key arrives in lower case) |
 
 ---
 

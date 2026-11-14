@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, get_origin
 
 from pydantic import BaseModel
 from pydantic import fields as pydantic_fields
@@ -24,7 +24,6 @@ from psyplus.utils import (
 
 log = logging.getLogger(__name__)
 
-ENV_VAR_LISTINDEX_PLACEHOLDER = "<list-index>"
 ENV_VAR_DICTKEY_PLACEHOLDER = "<dict-key>"
 # Stands for "any element" in a path, e.g. ``servers[*].host`` in the Markdown doc.
 ANY_ITEM = "*"
@@ -126,6 +125,24 @@ class FieldInfoContainer:
             else:
                 parts.append(ENV_VAR_DICTKEY_PLACEHOLDER)
         return prefix + delimiter.join(parts)
+
+    def get_lowercased_dict_entry_env_var(self) -> str | None:
+        """For a dict field: the env var of one entry (``APP_MAP__<dict-key>``) when
+        pydantic-settings lowercases its key, else None.
+
+        Unless the model sets ``case_sensitive=True``, pydantic-settings lowercases env
+        var names before it splits them, so ``APP_MAP__Second__SIZE`` creates the key
+        ``second``. Keys in the JSON value of ``APP_MAP`` keep their case.
+        """
+        config = self.root_settings_class.model_config
+        delimiter = config.get("env_nested_delimiter")
+        if config.get("case_sensitive", False) or not delimiter:
+            return None
+        annotation = clean_annotation(self.get_annotation())
+        if not (annotation is dict or get_origin(annotation) is dict):
+            return None
+        env_var = self.get_env_var()
+        return env_var + delimiter + ENV_VAR_DICTKEY_PLACEHOLDER if env_var else None
 
     def get_path_str(self) -> str:
         return path_to_str(self.path)
@@ -242,6 +259,9 @@ class FieldInfoContainer:
                     data["Env-var:"] += f" ('{none_str}' sets null)"
                 else:
                     data["Env-var:"] += " (can not set null, use null in the YAML file)"
+            entry_env_var = self.get_lowercased_dict_entry_env_var()
+            if entry_env_var:
+                data["Env-var:"] += f"\n'{entry_env_var}' sets one entry, its key arrives in lower case"
 
         if fi.description:
             data["Description:"] = fi.description

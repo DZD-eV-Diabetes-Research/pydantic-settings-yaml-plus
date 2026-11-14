@@ -48,6 +48,7 @@ servers:
 # Required: False
 # Default:  {"primary": {"host": "primary.example.com", "port": 443}}
 # Env-var:  'MULTI_SERVER_MAP'
+#           'MULTI_SERVER_MAP__<dict-key>' sets one entry, its key arrives in lower case
 server_map:
 
   # ## primary ###

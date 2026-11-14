@@ -227,6 +227,8 @@ print(config.database_server.host)   # → "localhost" (or whatever is in the YA
 print(config.log_level)              # → "INFO"
 ```
 
+`load()` returns an instance of your model class itself (`type(config) is MyAppConfig`), validated once, exactly as if you had called `MyAppConfig()`. It compares equal to and pickles like any other `MyAppConfig` instance.
+
 `load()` honours environment variable overrides through pydantic-settings' standard source priority: **env vars beat YAML values**. For example:
 
 ```bash
@@ -235,10 +237,10 @@ export APP_LOG_LEVEL=DEBUG
 
 …will make `config.log_level == "DEBUG"` even if the YAML file says `INFO`.
 
-> **Tip:** if you prefer to keep psyplus out of your runtime path, configure `yaml_file` directly in your model and call it without psyplus:
+> **Tip:** if you prefer to keep psyplus out of your runtime path, configure `yaml_file` directly in your model and add a YAML source (setting `yaml_file` alone is not enough, pydantic-settings does not read it by default):
 >
 > ```python
-> from pydantic_settings import BaseSettings, SettingsConfigDict
+> from pydantic_settings import BaseSettings, SettingsConfigDict, YamlConfigSettingsSource
 >
 > class MyAppConfig(BaseSettings):
 >     model_config = SettingsConfigDict(
@@ -247,8 +249,19 @@ export APP_LOG_LEVEL=DEBUG
 >         env_nested_delimiter="__",
 >     )
 >
-> config = MyAppConfig()  # reads YAML + env vars automatically
+>     @classmethod
+>     def settings_customise_sources(
+>         cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings
+>     ):
+>         return (
+>             init_settings, env_settings, dotenv_settings, file_secret_settings,
+>             YamlConfigSettingsSource(settings_cls),
+>         )
+>
+> config = MyAppConfig()  # reads YAML + env vars
 > ```
+>
+> Such a model still works with `load()`: psyplus then reads its own `file_path` in place of `yaml_file` (see [Environment variable overrides](#environment-variable-overrides)).
 
 ---
 
@@ -305,7 +318,7 @@ These files are regenerated automatically by the smoke script (`pdm run smoke`) 
 | `generate_markdown_doc(output_path)` | Write a Markdown reference document to `output_path`. |
 | `render_yaml() → str` | Render the documented YAML as a string without touching the filesystem. |
 | `render_markdown() → str` | Render the Markdown reference document as a string without touching the filesystem. |
-| `load() → BaseSettings` | Load `file_path`, apply env var overrides, return a validated settings instance. |
+| `load() → model` | Load `file_path`, apply env var overrides, return a validated instance of `model`. |
 
 ### `YamlFileGenerator(settings_class, indent_size=2)`
 
@@ -413,16 +426,19 @@ gives null.
 
 ## Environment variable overrides
 
-`load()` creates a thin dynamic subclass that adds the YAML file as a pydantic-settings source while keeping the normal env var source with higher priority. The effective source priority (highest → lowest) is:
+`load()` uses the same sources pydantic-settings uses for your model and adds the YAML file as the lowest priority source, just above the field defaults. For a model without its own `settings_customise_sources` the effective source priority (highest → lowest) is:
 
-1. **Init arguments** (values passed to the settings class directly)
-2. **Environment variables** (respects `env_prefix` / `env_nested_delimiter`)
-3. **`.env` file** (if the model sets `env_file`)
-4. **Secrets directory** (if the model sets `secrets_dir`)
-5. **YAML file** values
-6. **Model defaults**
+1. **Environment variables** (respects `env_prefix` / `env_nested_delimiter`)
+2. **`.env` file** (if the model sets `env_file`)
+3. **Secrets directory** (if the model sets `secrets_dir`)
+4. **YAML file** values
+5. **Model defaults**
 
 No changes to your settings class are required.
+
+If your model defines `settings_customise_sources`, `load()` respects it: the YAML file is added after the sources it returns, and a source it leaves out stays out. A model that drops `env_settings`, for example, ignores env vars in `load()` too. If it already returns a `YamlConfigSettingsSource`, `load()` adds no second one but reads `file_path` through it, at the position your model chose.
+
+Command line parsing configured in `model_config` (`cli_parse_args`, `cli_settings_source`) also applies to `load()`, with the command line beating all other sources.
 
 A missing YAML file is not an error: `load()` then returns the model defaults plus whatever the env vars, the `.env` file and the secrets directory set.
 

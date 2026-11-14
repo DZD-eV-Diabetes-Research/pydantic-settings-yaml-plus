@@ -44,7 +44,7 @@ A helper library that builds upon [pydantic-settings](https://docs.pydantic.dev/
 pip install psyplus
 ```
 
-**Requirements:** Python ≥ 3.12, pydantic ≥ 2.0, pydantic-settings ≥ 2.3
+**Requirements:** Python ≥ 3.11, pydantic ≥ 2.0, pydantic-settings ≥ 2.3
 
 ---
 

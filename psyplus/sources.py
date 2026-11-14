@@ -33,7 +33,9 @@ Only the env and ``.env`` sources ``load()`` passes to the model's
 ``settings_customise_sources`` read list indices. A source the model builds itself is
 used as pydantic-settings makes it.
 
-Private pydantic-settings API this module relies on (checked with 2.13.1 to 2.16.3):
+Private pydantic-settings API this module relies on (checked with 2.13.1 to 2.16.3;
+the weekly "Newest dependencies" CI workflow, ``.github/workflows/newest-deps.yml``,
+runs the tests against the newest releases so a breaking change shows up early):
 
 * ``PydanticBaseEnvSettingsSource._extract_field_info`` (env var names of a field),
 * the ``env_vars`` attribute of ``EnvSettingsSource``, replaced for one call,

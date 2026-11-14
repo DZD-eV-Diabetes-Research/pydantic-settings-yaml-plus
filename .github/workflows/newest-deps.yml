@@ -1,0 +1,38 @@
+name: Newest dependencies
+
+# psyplus/sources.py relies on internals of pydantic-settings that can change in
+# any release. The Tests workflow installs from pdm.lock, so it only notices such a
+# change when the lock is updated. This job installs the newest releases of all
+# dependencies once a week (and on demand) and runs the test suite against them.
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"  # Mondays 05:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  newest-deps:
+    name: "Newest dependency versions (Python 3.14)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # full history so pdm-backend can read git tags for versioning
+
+      - name: Install uv
+        # setup-uv publishes no floating major tag, so pin the release commit
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+
+      - name: Install newest releases of all dependencies
+        # No lock file: --resolution highest picks the newest release of every direct
+        # and indirect dependency. Pre-releases stay off (uv's default).
+        run: |
+          uv venv --python 3.14
+          uv pip install --resolution highest --prerelease disallow -e ".[test]"
+          uv pip list
+
+      - name: Run tests
+        run: .venv/bin/python -m pytest tests/

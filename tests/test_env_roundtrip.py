@@ -1,14 +1,17 @@
 """Every env var name psyplus documents must actually set that value in load().
 
 For each scalar (str/int) leaf that has an env var in the generated YAML comments or in
-the Markdown doc:
+the Markdown doc (including the env var for one element of a list field):
   1. write the generated YAML template to disk (with its empty required values filled in),
-  2. set the documented env var (placeholders replaced by a real key) to a sentinel,
+  2. set the documented env var (placeholders replaced by a real key or list index) to
+     a sentinel,
   3. call YamlSettingsPlus.load(),
-  4. assert the leaf now holds the sentinel.
+  4. assert the leaf now holds the sentinel and every other value is still the one from
+     the YAML file (a list element env var changes one element, not the whole list).
 """
 from __future__ import annotations
 
+import copy
 import os
 import re
 from typing import get_args, get_origin
@@ -42,6 +45,10 @@ MODELS = [
     cases.CamelCaseSens,
     cases.UnionAliases,
     cases.UnionAliasesByName,
+    cases.ListCases,
+    cases.MaxSplitLists,
+    cases.MaxSplitOneLevel,
+    cases.CaseSensLists,
     NestedModel,
     MultiNestedModel,
     MyAppConfig,
@@ -76,14 +83,19 @@ _SEGMENT = re.compile(r"\[(\d+|\*|'[^']*')\]|([^.\[\]]+)")
 # ---------------------------------------------------------------------------
 
 def yaml_env_names(model) -> dict[str, str]:
-    """Parse the generated YAML and return {yaml_path: env_var_name}."""
+    """Parse the generated YAML and return {yaml_path: env_var_name}.
+
+    The env var for one element of a list field (second line of ``Env-var:``) is
+    returned for the path ``<list field>[*]``.
+    """
     out: dict[str, str] = {}
     key = path = None
+    in_env_var = False
     for raw in YamlSettingsPlus(model).render_yaml().splitlines():
         line = raw.strip()
         m = re.match(r"# ## (.+?)(?: - .*)? ###$", line)
         if m:
-            key, path = m.group(1), None
+            key, path, in_env_var = m.group(1), None, False
             continue
         m = re.match(r"# YAML-path:\s+(.+)$", line)
         if m:
@@ -92,11 +104,21 @@ def yaml_env_names(model) -> dict[str, str]:
         m = re.match(r"# Env-var:\s+'([^']+)'", line)
         if m and key is not None:
             out[path or key] = m.group(1)
+            in_env_var = True
+            continue
+        m = re.match(r"#\s+'([^']+)' \(one element", line)
+        if m and in_env_var:
+            out[f"{path or key}[*]"] = m.group(1)
+            continue
+        in_env_var = False
     return out
 
 
 def md_env_names(model) -> dict[str, str]:
-    """Parse the generated Markdown and return {heading_path: env_var_name}."""
+    """Parse the generated Markdown and return {heading_path: env_var_name}.
+
+    The env var for one element of a list field is returned for ``<list field>[*]``.
+    """
     out: dict[str, str] = {}
     path = None
     for line in YamlSettingsPlus(model).render_markdown().splitlines():
@@ -107,6 +129,9 @@ def md_env_names(model) -> dict[str, str]:
         m = re.match(r"\| Environment variable \| `([^`]+)`", line)
         if m and path:
             out[path] = m.group(1)
+        m = re.match(r"\| Environment variable \(one element\) \| `([^`]+)`", line)
+        if m and path:
+            out[f"{path}[*]"] = m.group(1)
     return out
 
 
@@ -153,10 +178,16 @@ def field_name(model_cls, key):
         if (alias if isinstance(alias, str) else name) == key:
             return name
     return None
+def set_path(data, segments, value):
+    for seg in segments[:-1]:
+        data = data[seg]
+    data[segments[-1]] = value
 
 
 def get_attr_path(obj, segments):
     for seg in segments:
+        if isinstance(obj, (set, frozenset)):
+            obj = sorted(obj)  # the test sets have one element
         if isinstance(seg, int) or isinstance(obj, dict):
             obj = obj[seg]
         else:
@@ -240,11 +271,14 @@ def test_documented_env_var_sets_value(
 ):
     if source == "template":
         pytest.fail(f"the template of {model.__name__} can not be filled in: {value!r}")
-    # Each <dict-key> placeholder becomes the concrete key of this element.
+    # Each <dict-key> placeholder becomes the concrete key of this element, each
+    # <list-index> placeholder the concrete index.
     keys = iter(
         [s for i, s in enumerate(concrete) if isinstance(s, str) and is_dict_key(model, concrete[:i])]
     )
+    indices = iter([s for s in concrete if isinstance(s, int)])
     concrete_env = re.sub(r"<dict-key>", lambda _m: next(keys), env)
+    concrete_env = re.sub(r"<list-index>", lambda _m: str(next(indices)), concrete_env)
 
     sentinel = "ENVVAL" if isinstance(value, str) else 4242
     allowed = get_literal_list(annotation_at(model, concrete))
@@ -270,3 +304,22 @@ def test_documented_env_var_sets_value(
     assert got == sentinel, (
         f"documented env var {concrete_env!r} ({source}) did not set {path}: got {got!r}"
     )
+    # Everything else keeps the value from the YAML file.
+    expected = copy.deepcopy(template)
+    set_path(expected, concrete, sentinel)
+    assert loaded == model.model_validate(expected), (
+        f"documented env var {concrete_env!r} ({source}) changed more than {path}"
+    )
+
+
+def test_list_element_env_vars_are_documented():
+    """The names above only reach the roundtrip test when the generated files show them."""
+    yaml_names = yaml_env_names(cases.ListCases)
+    md_names = md_env_names(cases.ListCases)
+    assert yaml_names["tagged[*]"] == "APP_TAGGED__<list-index>"
+    assert yaml_names["tagged[0].name"] == "APP_TAGGED__<list-index>__NAME"
+    assert yaml_names["tagged[1].tags[0]"] == "APP_TAGGED__<list-index>__TAGS__<list-index>"
+    assert yaml_names["groups['admins'][1]"] == "APP_GROUPS__<dict-key>__<list-index>"
+    assert yaml_names["matrix[1][0]"] == "APP_MATRIX__<list-index>__<list-index>"
+    assert md_names["tagged[*].tags[*]"] == "APP_TAGGED__<list-index>__TAGS__<list-index>"
+    assert md_names["nested.tags[*]"] == "APP_NESTED__TAGS__<list-index>"

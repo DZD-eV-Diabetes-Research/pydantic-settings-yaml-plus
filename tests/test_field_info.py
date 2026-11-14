@@ -1,5 +1,5 @@
 """Tests for psyplus/field_info.py — FieldInfoContainer."""
-from typing import Annotated, Dict, List, Literal, Optional
+from typing import Annotated, Dict, List, Literal, Optional, Set, Tuple
 
 import pytest
 from pydantic import Field
@@ -73,8 +73,8 @@ class TestGetEnvVar:
             field_name="name",
             root_settings_class=RootModel,
         )
-        # pydantic-settings can not set a single list element
-        assert c.get_env_var() is None
+        # load() reads a list index in the name, <list-index> stands for it
+        assert c.get_env_var() == "MY_ITEMS__<list-index>__NAME"
 
     def test_dict_key_in_path(self):
         c = FieldInfoContainer(
@@ -95,6 +95,67 @@ class TestGetEnvVar:
             root_settings_class=NoPrefixModel,
         )
         assert c.get_env_var() == "FIELD"
+
+    def test_list_index_and_dict_key_placeholders(self):
+        c = FieldInfoContainer(
+            path=["groups", DictKey(key="g"), ListIndex(index="*"), "name"],
+            field_name="name",
+            root_settings_class=RootModel,
+        )
+        assert c.get_env_var() == "MY_GROUPS__<dict-key>__<list-index>__NAME"
+
+    def test_max_split_limits_the_levels_below_the_field(self):
+        class Split(BaseSettings):
+            model_config = SettingsConfigDict(
+                env_prefix="S_", env_nested_delimiter="_", env_nested_max_split=1
+            )
+
+        element = FieldInfoContainer(
+            path=["items", ListIndex(index=0)], field_name="[0]", root_settings_class=Split
+        )
+        element_field = FieldInfoContainer(
+            path=["items", ListIndex(index=0), "name"], field_name="name",
+            root_settings_class=Split,
+        )
+        assert element.get_env_var() == "S_ITEMS_<list-index>"
+        # S_ITEMS_0_NAME would be split into ["0_name"] only
+        assert element_field.get_env_var() is None
+
+
+class TestGetListElementEnvVar:
+    def _container(self, annotation, model=RootModel):
+        return FieldInfoContainer(
+            path=["field"],
+            field_name="field",
+            field_info=FieldInfo.from_annotation(annotation),
+            root_settings_class=model,
+        )
+
+    @pytest.mark.parametrize(
+        "annotation",
+        [List[str], Optional[List[int]], Tuple[int, ...], Set[str], Annotated[List[str], "x"]],
+    )
+    def test_list_like_field(self, annotation):
+        assert self._container(annotation).get_list_element_env_var() == "MY_FIELD__<list-index>"
+
+    @pytest.mark.parametrize("annotation", [str, Dict[str, str], Optional[int]])
+    def test_other_fields(self, annotation):
+        assert self._container(annotation).get_list_element_env_var() is None
+
+    def test_no_delimiter(self, monkeypatch):
+        monkeypatch.setenv("PSYPLUS_SUPPRESS_ENV_WARNING", "1")
+
+        class NoDelim(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="ND_")
+
+        assert self._container(List[str], NoDelim).get_list_element_env_var() is None
+
+    def test_comment_lists_it_under_the_env_var(self):
+        lines = self._container(List[str]).build_comment_lines()
+        i = lines.index("Env-var:  'MY_FIELD'")
+        assert lines[i + 1] == (
+            "          'MY_FIELD__<list-index>' (one element, 0 is the first; psyplus load() only)"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -319,8 +380,9 @@ class TestDictEntryEnvVar:
         assert self._container(RootModel, ["name"], str).get_lowercased_dict_entry_env_var() is None
         entry = self._container(RootModel, ["servers", DictKey(key="*"), "host"], str)
         assert entry.get_lowercased_dict_entry_env_var() is None
+        # A dict inside a list element: load() reads it, its keys arrive in lower case.
         listed = self._container(RootModel, ["items", ListIndex(index=0)], Dict[str, str])
-        assert listed.get_lowercased_dict_entry_env_var() is None
+        assert listed.get_lowercased_dict_entry_env_var() == "MY_ITEMS__<list-index>__<dict-key>"
 
     def test_none_when_case_sensitive(self):
         class Sensitive(BaseSettings):
@@ -344,8 +406,3 @@ class TestDictEntryEnvVar:
             "'MY_LABELS__<dict-key>' sets one entry, its key arrives in lower case"
         )
 
-
-def test_unused_list_index_placeholder_is_gone():
-    import psyplus.field_info
-
-    assert not hasattr(psyplus.field_info, "ENV_VAR_LISTINDEX_PLACEHOLDER")

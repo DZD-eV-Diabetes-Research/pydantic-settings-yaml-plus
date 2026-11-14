@@ -162,11 +162,21 @@ class TestCollectionNestedRecursion:
         assert "`MULTI_SERVER_MAP__<dict-key>__HOST`" in doc
         assert "[*]__" not in doc
 
-    def test_list_item_fields_have_no_env_var(self):
-        # pydantic-settings can not set a single list element
+    def test_list_item_fields_use_list_index_placeholder(self):
+        # load() can set a single list element, <list-index> stands for its position
         doc = _generate(MultiNestedModel)
-        assert "MULTI_SERVERS__" not in doc
+        assert "`MULTI_SERVERS__<list-index>__HOST`" in doc
+        assert "`MULTI_SERVERS__<list-index>__PORT`" in doc
         assert "MULTI_SERVERS[" not in doc
+
+    def test_list_field_shows_env_var_for_one_element(self):
+        doc = _generate(MultiNestedModel)
+        assert (
+            "| Environment variable (one element) | `MULTI_SERVERS__<list-index>` "
+            "(0 is the first; psyplus `load()` only) |"
+        ) in doc
+        # Dicts get no such row
+        assert "MULTI_SERVER_MAP__<dict-key>` (" not in doc
 
     def test_sub_fields_have_property_tables(self):
         doc = _generate(MultiNestedModel)

@@ -87,6 +87,7 @@ Database name (required)
 | Required | No |
 | Default | `[]` |
 | Environment variable | `APP_DATABASE__TAGS` |
+| Environment variable (one element) | `APP_DATABASE__TAGS__<list-index>` (0 is the first; psyplus `load()` only) |
 
 ---
 

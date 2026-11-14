@@ -169,6 +169,23 @@ class TestMultiNestedGeneration:
         assert parsed["server_map"]["primary"]["host"] == "primary.example.com"
         assert parsed["server_map"]["primary"]["port"] == 443
 
+    def test_list_field_comment_shows_env_var_for_one_element(self):
+        raw, _ = _generate(MultiNestedModel)
+        assert (
+            "# Env-var:  'MULTI_SERVERS'\n"
+            "#           'MULTI_SERVERS__<list-index>' "
+            "(one element, 0 is the first; psyplus load() only)\n"
+            "servers:"
+        ) in raw
+        # Dicts get no such line, nor do lists without env_nested_delimiter.
+        assert "MULTI_SERVER_MAP__<list-index>" not in raw
+        assert "<list-index>" not in _generate(SimpleModel)[0]
+
+    def test_list_elements_show_env_var_with_list_index(self):
+        raw, _ = _generate(MultiNestedModel)
+        assert raw.count("# Env-var:   'MULTI_SERVERS__<list-index>'\n") == 2
+        assert raw.count("# Env-var:   'MULTI_SERVERS__<list-index>__HOST'\n") == 2
+
 
 # ---------------------------------------------------------------------------
 # YamlFileGenerator — README example model
@@ -363,3 +380,29 @@ class TestNullUnionOfModels:
                 f"#   {field}.bark: 'APP_{env}__BARK'\n"
                 f"{field}:"
             ) in raw
+
+    def test_null_sub_model_lists_the_env_vars_of_its_list_elements(self):
+        from typing import List, Optional
+
+        from pydantic import BaseModel
+        from pydantic_settings import BaseSettings, SettingsConfigDict
+
+        class Srv(BaseModel):
+            host: str = "h"
+
+        class Pool(BaseModel):
+            servers: List[Srv] = []
+
+        class M(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="APP_", env_nested_delimiter="__")
+            pool: Optional[Pool] = None
+
+        raw, _ = _generate(M)
+        assert (
+            "# Env-vars of the sub-fields:\n"
+            "#   pool.servers: 'APP_POOL__SERVERS'\n"
+            "#   pool.servers[*]: 'APP_POOL__SERVERS__<list-index>' "
+            "(one element, 0 is the first; psyplus load() only)\n"
+            "#   pool.servers[*].host: 'APP_POOL__SERVERS__<list-index>__HOST'\n"
+            "pool:"
+        ) in raw

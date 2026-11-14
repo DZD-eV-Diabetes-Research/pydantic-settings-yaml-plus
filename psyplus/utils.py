@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import collections
+import collections.abc
 import datetime
 import enum
 import json
 import re
+import typing
 from typing import Annotated, Any, Generator, Literal, Union, cast, get_args, get_origin
 
 from pydantic import (
@@ -82,6 +85,36 @@ def clean_annotation(annotation: Any) -> Any:
     if is_optional(annotation):
         return clean_annotation(unwrap_optional(annotation))
     return annotation
+
+
+# ``type X = ...`` aliases: ``typing.TypeAliasType`` from Python 3.12 on, and the
+# ``typing_extensions`` variant (its own class on Python 3.11).
+try:
+    import typing_extensions as _typing_extensions
+except ImportError:  # pragma: no cover
+    _typing_extensions = None  # type: ignore[assignment]
+TYPE_ALIAS_TYPES: tuple[type, ...] = tuple(
+    {getattr(m, "TypeAliasType", None) for m in (typing, _typing_extensions)} - {None}
+)
+
+
+def unwrap_type_alias(annotation: Any) -> Any:
+    """The value of a ``type X = ...`` alias (also nested ones), else *annotation*."""
+    while isinstance(annotation, TYPE_ALIAS_TYPES):
+        annotation = annotation.__value__
+    return annotation
+
+
+def is_list_like(annotation: Any) -> bool:
+    """True for list, tuple, set, frozenset, deque and other sequence or set annotations.
+
+    Looks through type aliases, Annotated and Optional. str and bytes do not count.
+    """
+    cleaned = unwrap_type_alias(clean_annotation(unwrap_type_alias(annotation)))
+    origin = get_origin(cleaned) or cleaned
+    if not isinstance(origin, type) or issubclass(origin, (str, bytes, bytearray, BaseModel)):
+        return False
+    return issubclass(origin, (collections.abc.Sequence, collections.abc.Set, collections.deque))
 
 
 def _is_enum_class(annotation: Any) -> bool:

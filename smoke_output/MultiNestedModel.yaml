@@ -3,18 +3,21 @@
 # Required: False
 # Default:  [{"host": "a.example.com", "port": 80}, {"host": "b.example.com", "port": 80}]
 # Env-var:  'MULTI_SERVERS'
+#           'MULTI_SERVERS__<list-index>' (one element, 0 is the first; psyplus load() only)
 servers:
 
   # ## List[0] ###
   # YAML-path: servers[0]
   # Type:      Object (ServerItem)
   # Required:  False
+  # Env-var:   'MULTI_SERVERS__<list-index>'
   -
 
     # ## host ###
     # YAML-path: servers[0].host
     # Type:      str
     # Required:  True
+    # Env-var:   'MULTI_SERVERS__<list-index>__HOST'
     host: a.example.com
 
     # ## port ###
@@ -22,18 +25,21 @@ servers:
     # Type:      int
     # Required:  False
     # Default:   80
+    # Env-var:   'MULTI_SERVERS__<list-index>__PORT'
     port: 80
 
   # ## List[1] ###
   # YAML-path: servers[1]
   # Type:      Object (ServerItem)
   # Required:  False
+  # Env-var:   'MULTI_SERVERS__<list-index>'
   -
 
     # ## host ###
     # YAML-path: servers[1].host
     # Type:      str
     # Required:  True
+    # Env-var:   'MULTI_SERVERS__<list-index>__HOST'
     host: b.example.com
 
     # ## port ###
@@ -41,6 +47,7 @@ servers:
     # Type:      int
     # Required:  False
     # Default:   80
+    # Env-var:   'MULTI_SERVERS__<list-index>__PORT'
     port: 80
 
 # ## server_map ###

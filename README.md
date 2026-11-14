@@ -209,6 +209,7 @@ database_server:
 # Type:     Dictionary of (str, str)
 # Required: True
 # Env-var:  'APP_INIT_VALUES'
+#           'APP_INIT_VALUES__<dict-key>' sets one entry, its key arrives in lower case
 init_values:
 ```
 

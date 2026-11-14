@@ -174,7 +174,8 @@ class YamlSettingsPlus(Generic[SettingsT]):
         # ``_build_sources`` makes BaseSettings.__init__ use these sources
         # instead of building its own, so the model class itself is
         # instantiated and validated exactly once.
-        sources = resolve_list_patches(self.model, self._settings_sources())
+        sources = self._settings_sources()
+        sources = resolve_list_patches(self.model, sources, self._list_index_sources)
         return self.model(_build_sources=(sources, {}))
 
     def _settings_sources(self) -> tuple[PydanticBaseSettingsSource, ...]:
@@ -185,11 +186,15 @@ class YamlSettingsPlus(Generic[SettingsT]):
             yaml_file=self.config_file,
             yaml_file_encoding=model.model_config.get("yaml_file_encoding") or "utf-8",
         )
+        # The model may also wrap these in a source of its own (see load()).
+        self._list_index_sources = (
+            self._env_settings_source(), ListIndexDotEnvSettingsSource(model)
+        )
         sources = model.settings_customise_sources(
             model,
             init_settings=InitSettingsSource(model, init_kwargs={}),
-            env_settings=self._env_settings_source(),
-            dotenv_settings=ListIndexDotEnvSettingsSource(model),
+            env_settings=self._list_index_sources[0],
+            dotenv_settings=self._list_index_sources[1],
             file_secret_settings=SecretsSettingsSource(model),
         )
         if any(isinstance(s, YamlConfigSettingsSource) for s in sources):

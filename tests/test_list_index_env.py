@@ -11,10 +11,12 @@ from pathlib import Path
 from typing import Annotated, Dict, List, Optional, Set, Tuple, Union
 from unittest import mock
 
+import pydantic
 import pytest
 import yaml
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError, field_validator
 from pydantic.alias_generators import to_camel
+from typing_extensions import TypeAliasType
 from pydantic_settings import (
     BaseSettings,
     DotEnvSettingsSource,
@@ -643,3 +645,111 @@ class TestSameSourceWholeValue:
         # A list from the YAML file is patched as usual.
         assert load(ND, tmp_path, {"APP_TAGS__1": "x"}, {"tags": ["a", "b"]}).tags == ["a", "x"]
 
+
+# ---------------------------------------------------------------------------
+# Second review findings
+# ---------------------------------------------------------------------------
+
+_PYDANTIC_2_11 = tuple(int(p) for p in pydantic.VERSION.split(".")[:2]) >= (2, 11)
+
+
+class TestMoreKeys:
+    @pytest.mark.skipif(not _PYDANTIC_2_11, reason="validate_by_alias needs pydantic 2.11")
+    def test_validate_by_alias_false(self, tmp_path):
+        class SrvByName(BaseModel):
+            model_config = ConfigDict(
+                alias_generator=to_camel, validate_by_alias=False, validate_by_name=True
+            )
+            host_name: str = "h"
+
+        class Nested(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="APP_", env_nested_delimiter="__")
+            servers: List[SrvByName] = []
+
+        data = {"servers": [{"host_name": "a"}]}
+        cfg = load(Nested, tmp_path, {"APP_SERVERS__1__HOST_NAME": "x"}, data)
+        assert [s.host_name for s in cfg.servers] == ["a", "x"]
+
+        class Top(BaseSettings):
+            model_config = SettingsConfigDict(
+                env_prefix="APP_", env_nested_delimiter="__",
+                validate_by_alias=False, validate_by_name=True,
+            )
+            servers: List[str] = Field(["d"], alias="srv")
+
+        assert load(Top, tmp_path, {"APP_SERVERS__0": "x"}, data={}).servers == ["x"]
+
+    def test_dict_with_int_keys(self, tmp_path):
+        class IntKeys(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="APP_", env_nested_delimiter="__")
+            dl: Dict[int, List[str]] = {}
+
+        data = {"dl": {0: ["a", "b"]}}
+        assert load(IntKeys, tmp_path, {"APP_DL__0__1": "x"}, data).dl == {0: ["a", "x"]}
+        assert load(IntKeys, tmp_path, {"APP_DL__0__0": "x"}, data).dl == {0: ["x", "b"]}
+
+    def test_union_with_dict_keeps_a_dict_value_a_dict(self, tmp_path):
+        class U(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="APP_", env_nested_delimiter="__")
+            data: Union[List[str], Dict[str, str]] = {}
+
+        # As pydantic-settings reads it: the segment is a dict key.
+        assert load(U, tmp_path, {"APP_DATA__0": "x"}, {"data": {"a": "b"}}).data == {
+            "a": "b", "0": "x",
+        }
+        assert load(U, tmp_path, {"APP_DATA__0": "x"}, data={}).data == {"0": "x"}
+        # A list there is patched.
+        assert load(U, tmp_path, {"APP_DATA__1": "x"}, {"data": ["a", "b"]}).data == ["a", "x"]
+
+    def test_default_factory_taking_data_is_an_error(self, tmp_path):
+        class M(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="APP_", env_nested_delimiter="__")
+            base: List[str] = ["q"]
+            g: List[str] = Field(default_factory=lambda data: list(data["base"]))
+
+        with pytest.raises(SettingsError, match="APP_G__0: `g` is not in the YAML file"):
+            load(M, tmp_path, {"APP_G__0": "x"}, {"base": ["a", "b"]})
+        # In the YAML file it is patched as usual.
+        assert load(M, tmp_path, {"APP_G__0": "x"}, {"g": ["a", "b"]}).g == ["x", "b"]
+
+    def test_typing_extensions_type_alias(self, tmp_path):
+        Names = TypeAliasType("Names", List[str])
+
+        class A(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="APP_", env_nested_delimiter="__")
+            te: Names = []
+
+        assert load(A, tmp_path, {"APP_TE__1": "x"}, {"te": ["a", "b"]}).te == ["a", "x"]
+        assert "'APP_TE__<list-index>' (one element" in YamlSettingsPlus(A).render_yaml()
+
+
+class TestMoreSources:
+    def test_wrapped_env_source(self, tmp_path):
+        class Wrap(PydanticBaseSettingsSource):
+            def __init__(self, settings_cls, inner):
+                super().__init__(settings_cls)
+                self.inner = inner
+
+            def get_field_value(self, field, field_name):
+                return None, field_name, False
+
+            def __call__(self):
+                return self.inner()
+
+        class Wrapped(Cfg):
+            @classmethod
+            def settings_customise_sources(
+                cls, settings_cls, init_settings, env_settings, dotenv_settings,
+                file_secret_settings,
+            ):
+                return (init_settings, Wrap(settings_cls, env_settings))
+
+        assert load(Wrapped, tmp_path, {"APP_TAGS__0": "e"}).tags == ["e", "y"]
+
+    def test_error_shows_the_env_var_name_as_written(self, tmp_path):
+        data = {"groups": {"admins": ["a"]}}
+        with pytest.raises(SettingsError, match="Environment variable APP_GROUPS__Admins__5:"):
+            load(Cfg, tmp_path, {"APP_GROUPS__Admins__5": "x"}, data)
+        model = with_dotenv(tmp_path, "App_Groups__Admins__5=x\n")
+        with pytest.raises(SettingsError, match=r"App_Groups__Admins__5 in the \.env file:"):
+            load(model, tmp_path, {}, data)

@@ -526,13 +526,14 @@ The env var changes the list that the lower priority sources provide (usually th
 - **Index below the list length:** changes that element. The fields of an element model are merged into it (`APP_SERVERS__0__HOST` keeps the element's `port`), the same goes for a JSON object (`APP_SERVERS__0='{"host": "x"}'`). Any other value replaces the element.
 - **Index equal to the list length:** adds an element. Several new elements need consecutive indices (2, 3, 4 for a list of two). A new element that is a model needs its required fields set too.
 - **Index further beyond the end:** `load()` fails with an error that names the env var.
-- **List not in the YAML file:** the env var changes the field's default list. A field without a default (or with `null`) starts as an empty list, so its indices start at 0.
+- **List not in the YAML file:** the env var changes the field's default list. A field without a default (or with `null`) starts as an empty list, so its indices start at 0. A default from a `default_factory` that takes the other values (`lambda data: ...`) can not be changed this way: `load()` fails with an error, put the list in the YAML file or set it as a whole.
 - **Aliases:** the list is found in the YAML file under the field name or any of its aliases, and the changed list stays under that key.
 - **Whole list and elements together:** an index env var changes the whole list value from the same place (`APP_TAGS='["a", "b"]'` plus `APP_TAGS__1=c` gives `["a", "c"]`). A whole value that is not a JSON list there (a comma separated string for a `NoDecode` field, for example) can not be changed this way, `load()` fails with an error. A whole list from a higher priority source replaces everything below it, as usual.
 - **Not a list index:** `-1` or `01` where a list is expected is an error that names the env var. Other names (`APP_TAGS__NAME`) are left to pydantic-settings, as without psyplus.
+- **A list or a dict (`Union[List[str], Dict[str, str]]`):** a number is a list index only where the value it changes is a list. Where it is a dict, the number is a dict key, as pydantic-settings reads it.
 - **Tuples and sets** work like lists. For a set, the index counts the elements in the order the YAML file lists them.
 
-Only the env and `.env` sources that `load()` hands to your model's `settings_customise_sources` (`env_settings`, `dotenv_settings`) read list indices. A source your model builds itself (`EnvSettingsSource(settings_cls, env_prefix=...)`) works as pydantic-settings makes it, without list index support.
+Only the env and `.env` sources that `load()` hands to your model's `settings_customise_sources` (`env_settings`, `dotenv_settings`) read list indices. A source your model builds itself (`EnvSettingsSource(settings_cls, env_prefix=...)`) works as pydantic-settings makes it, without list index support. Under `load()`, `env_settings` and `dotenv_settings` are subclasses of `EnvSettingsSource` and `DotEnvSettingsSource`: `isinstance()` checks on them work, `type(...) is EnvSettingsSource` does not.
 
 ---
 

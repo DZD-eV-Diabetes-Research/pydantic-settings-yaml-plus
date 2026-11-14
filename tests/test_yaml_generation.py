@@ -380,3 +380,29 @@ class TestNullUnionOfModels:
                 f"#   {field}.bark: 'APP_{env}__BARK'\n"
                 f"{field}:"
             ) in raw
+
+    def test_null_sub_model_lists_the_env_vars_of_its_list_elements(self):
+        from typing import List, Optional
+
+        from pydantic import BaseModel
+        from pydantic_settings import BaseSettings, SettingsConfigDict
+
+        class Srv(BaseModel):
+            host: str = "h"
+
+        class Pool(BaseModel):
+            servers: List[Srv] = []
+
+        class M(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="APP_", env_nested_delimiter="__")
+            pool: Optional[Pool] = None
+
+        raw, _ = _generate(M)
+        assert (
+            "# Env-vars of the sub-fields:\n"
+            "#   pool.servers: 'APP_POOL__SERVERS'\n"
+            "#   pool.servers[*]: 'APP_POOL__SERVERS__<list-index>' "
+            "(one element, 0 is the first; psyplus load() only)\n"
+            "#   pool.servers[*].host: 'APP_POOL__SERVERS__<list-index>__HOST'\n"
+            "pool:"
+        ) in raw

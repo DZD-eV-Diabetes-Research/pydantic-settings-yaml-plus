@@ -23,6 +23,7 @@ from psyplus.utils import (
     readable_constraints,
     to_json_text,
     to_yaml_text,
+    unwrap_type_alias,
 )
 
 log = logging.getLogger(__name__)
@@ -387,10 +388,11 @@ class FieldInfoContainer:
     def get_sub_field_env_vars(self) -> list[tuple[str, str]]:
         """``(path, env var)`` for the fields of this field's sub-model, recursively.
 
-        Only direct sub-models are followed (``Optional[Model]`` included). For a
+        Only direct sub-models are followed (``Optional[Model]`` included), and the
+        elements of their list fields (``servers[*]``, ``servers[*].host``). For a
         Union of models the fields of every member are listed, each path once.
-        Fields without an env var of their own (list elements, no
-        ``env_nested_delimiter``) are left out.
+        Fields without an env var of their own (no ``env_nested_delimiter``) are
+        left out.
         """
         out: dict[str, str] = {}
 
@@ -410,6 +412,17 @@ class FieldInfoContainer:
                     if env_var:
                         out.setdefault(child.get_path_str(), env_var)
                     walk(child, seen + (cls,))
+                    element_env_var = child.get_list_element_env_var()
+                    element_args = get_args(unwrap_type_alias(clean_annotation(fi.annotation)))
+                    if element_env_var and element_args:
+                        element = FieldInfoContainer(
+                            path=child.path + [ListIndex(index=ANY_ITEM)],
+                            field_name=child.field_name,
+                            annotation=element_args[0],
+                            root_settings_class=self.root_settings_class,
+                        )
+                        out.setdefault(element.get_path_str(), element_env_var)
+                        walk(element, seen + (cls,))
 
         walk(self, ())
         return list(out.items())
@@ -491,7 +504,11 @@ class FieldInfoContainer:
             sub_env_vars = self.get_sub_field_env_vars()
             if sub_env_vars:
                 lines.append("Env-vars of the sub-fields:")
-                lines.extend(f"  {sub_path}: '{env}'" for sub_path, env in sub_env_vars)
+                lines.extend(
+                    f"  {sub_path}: '{env}'"
+                    + (f" {LIST_ELEMENT_ENV_VAR_NOTE}" if sub_path.endswith("[*]") else "")
+                    for sub_path, env in sub_env_vars
+                )
 
         if fi.examples:
             lines.extend(self._example_lines(key))

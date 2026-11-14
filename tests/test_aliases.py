@@ -452,6 +452,26 @@ class TestMarkdown:
         assert "my_field" not in md
         assert "sub_field" not in md
 
+    def test_field_left_out_of_the_yaml_file_has_the_note(self):
+        class Sub(BaseModel):
+            both: str = Field("x", alias="A", validation_alias="B")
+
+        class S(BaseSettings):
+            model_config = SettingsConfigDict(alias_generator=to_camel, env_prefix="APP_")
+            both: str = Field("x", alias="A", validation_alias="B")
+            explicit_val: str = Field("x", validation_alias="VAL")
+            log_level: str = "INFO"
+            sub: Sub = Sub()
+
+        md = YamlSettingsPlus(S).render_markdown()
+        sections = {s.split("\n", 1)[0]: s for s in md.split("\n## ")[1:]}
+        assert "under its alias `A`, but validation expects `B`" in sections["`B`"]
+        assert "| Environment variable | `B` |" in sections["`B`"]
+        assert "under its alias `explicitVal`, but validation expects `VAL`" in sections["`VAL`"]
+        # Readable fields, and sub-model fields (validated by pydantic), get no note.
+        assert md.count("can not be set in the YAML file") == 2
+        assert "can not be set" not in sections["`logLevel`"]
+
     def test_default_of_a_sub_model_uses_the_yaml_keys(self):
         # Validation reads camelCase, serialization keeps the field names: the Default
         # shows the keys of the YAML file, not what pydantic would dump.

@@ -16,6 +16,7 @@ from psyplus.field_info import (
     path_to_str,
     yaml_key_path,
     yaml_keyed,
+    yaml_source_alias,
 )
 from psyplus.utils import (
     clean_annotation,
@@ -29,6 +30,12 @@ from psyplus.utils import (
 )
 
 log = logging.getLogger(__name__)
+
+_UNREADABLE_NOTE = (
+    "**Note:** this field can not be set in the YAML file. pydantic-settings reads it "
+    "from the YAML file under its alias {alias}, but validation expects {key}, so no "
+    "key works there. Set it through its environment variable.\n"
+)
 
 
 def _value_code(value: Any) -> str:
@@ -78,7 +85,15 @@ class MarkdownDocGenerator:
                 field_info=fi,
                 root_settings_class=self.settings_class,
             )
-            lines.extend(self._field_section(container, fi, heading_level))
+            section = self._field_section(container, fi, heading_level)
+            source_alias = yaml_source_alias(self.settings_class, cls, fi, key_path)
+            if source_alias is not None:
+                note = _UNREADABLE_NOTE.format(
+                    alias=md_code(source_alias), key=md_code(str(key_path[0]))
+                )
+                # Before the closing rule of the section.
+                section[-1:-1] = [note]
+            lines.extend(section)
 
             # Recurse into nested models: direct, Optional, Union of models, list or dict items
             annotation = clean_annotation(fi.annotation) if fi.annotation else None

@@ -116,6 +116,27 @@ def yaml_key_path(
     return [FieldKey(alias, field_info, is_alias=True)]
 
 
+def yaml_source_alias(
+    root_settings_class: type[BaseModel],
+    model_cls: type[BaseModel],
+    field_info: pydantic_fields.FieldInfo,
+    key_path: list[FieldKey | ListIndex],
+) -> str | None:
+    """The alias under which the YAML source files a field that validation rejects there.
+
+    pydantic-settings' YAML source files each top-level value under the field's
+    ``alias``. When validation reads another name (a different ``validation_alias``,
+    an ``alias_generator`` next to an explicit ``validation_alias``, or
+    ``validate_by_alias=False``), the field can not be set from the YAML file under
+    any key. None when the field reads fine.
+    """
+    if model_cls is not root_settings_class or not isinstance(field_info.alias, str):
+        return None
+    if field_info.alias == key_path[0]:
+        return None
+    return field_info.alias
+
+
 def yaml_keyed(value: Any) -> Any:
     """*value* with every model in it turned into a dict under its YAML keys.
 

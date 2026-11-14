@@ -21,6 +21,7 @@ from psyplus.field_info import (
     key_name,
     path_to_str,
     yaml_key_path,
+    yaml_source_alias,
 )
 from psyplus.utils import clean_annotation, sequence_item_annotation
 
@@ -160,7 +161,10 @@ class YamlFileGenerator:
                 field_info=fi,
                 root_settings_class=self.settings_class,
             )
-            note = self._unreadable_note(cls, fi, key_path)
+            note = None
+            source_alias = yaml_source_alias(self.settings_class, cls, fi, key_path)
+            if source_alias is not None:
+                note = _UNREADABLE_NOTE.format(alias=source_alias, key=key_path[0])
             target = None
             if note is None:
                 target = self._target_map(
@@ -209,25 +213,6 @@ class YamlFileGenerator:
             )
 
         return result
-
-    def _unreadable_note(
-        self,
-        cls: type[BaseModel],
-        fi: FieldInfo,
-        key_path: list[FieldKey | ListIndex],
-    ) -> str | None:
-        """A note when pydantic-settings can not read the field from the YAML file.
-
-        The YAML source files each top-level value under the field's ``alias``. When
-        validation reads another name (a different ``validation_alias``, an
-        ``alias_generator`` next to an explicit ``validation_alias``, or
-        ``validate_by_alias=False``), the value is rejected under any key.
-        """
-        if cls is not self.settings_class or not isinstance(fi.alias, str):
-            return None
-        if fi.alias == key_path[0]:
-            return None
-        return _UNREADABLE_NOTE.format(alias=fi.alias, key=key_path[0])
 
     @staticmethod
     def _target_map(

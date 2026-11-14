@@ -5,6 +5,11 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  # Lets the publish workflow run the same jobs before uploading a release.
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -13,15 +18,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # full history so pdm-backend can read git tags for versioning
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -31,6 +36,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: true
 
+      - name: Check that pdm.lock matches pyproject.toml
+        run: pdm lock --check
+
       - name: Install dependencies
         run: pdm install -G test
 
@@ -38,8 +46,34 @@ jobs:
         run: pdm run pytest tests/ --cov=psyplus --cov-report=term-missing --cov-report=xml
 
       - name: Upload coverage report
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v7
         if: matrix.python-version == '3.12'
         with:
           files: coverage.xml
           fail_ci_if_error: false
+
+  lowest-deps:
+    # The job above installs from pdm.lock, which holds the newest versions.
+    # This one installs the lowest versions pyproject.toml allows for the direct
+    # dependencies, so the stated floors stay honest. It runs on the lowest
+    # supported Python because old releases (pydantic-core 2.27, PyYAML 6.0.1)
+    # have no wheels for newer Pythons.
+    name: "Lowest dependency versions (Python 3.11)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # full history so pdm-backend can read git tags for versioning
+
+      - name: Install uv
+        # setup-uv publishes no floating major tag, so pin the release commit
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+
+      - name: Install lowest direct dependency versions
+        run: |
+          uv venv --python 3.11
+          uv pip install --resolution lowest-direct -e ".[test]"
+          uv pip list
+
+      - name: Run tests
+        run: .venv/bin/python -m pytest tests/

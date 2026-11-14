@@ -161,3 +161,7 @@ cython_debug/
 /*.yaml
 
 
+
+# Local interpreter path written by pdm, and editor settings
+.pdm-python
+.vscode/

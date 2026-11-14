@@ -6,23 +6,41 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
+  tests:
+    # Same jobs as on push and pull requests, run against the released commit.
+    uses: ./.github/workflows/tests.yml
+
   deploy:
+    needs: tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # full history so pdm-backend can read the release tag for the version
+
       - name: Set up Python
-        uses: actions/setup-python@v3
+        uses: actions/setup-python@v7
         with:
           python-version: "3.x"
-      - name: Install dependencies
-        working-directory: ./
-        run: python -m pip install --upgrade pip wheel build setuptools-git-versioning
+
+      - name: Install build frontend
+        run: python -m pip install --upgrade build
+
       - name: Build package
-        working-directory: ./
+        # pdm-backend is installed into an isolated build environment from [build-system]
         run: python -m build
+
+      - name: Check that the built version matches the release tag
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="${TAG#v}"
+          ls -l dist/
+          test -f "dist/psyplus-${version}.tar.gz" || { echo "sdist for version ${version} not found"; exit 1; }
+          test -f "dist/psyplus-${version}-py3-none-any.whl" || { echo "wheel for version ${version} not found"; exit 1; }
+
       - name: Publish package
         uses: pypa/gh-action-pypi-publish@release/v1
         with:

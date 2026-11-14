@@ -77,13 +77,13 @@ string_dict:
 # Type:     str
 # Required: True
 # Env-var:  'SIMPLE_REQUIRED_STRING'
-required_string: ''
+required_string:
 
 # ## required_list ###
 # Type:     List of str
 # Required: True
 # Env-var:  'SIMPLE_REQUIRED_LIST'
-required_list: []
+required_list:
 
 # ## fully_documented - Great String ###
 # Type:        str or null

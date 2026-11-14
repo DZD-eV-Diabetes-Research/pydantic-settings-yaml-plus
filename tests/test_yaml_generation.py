@@ -2,7 +2,7 @@
 import yaml
 import pytest
 
-from psyplus.yaml_generator import YamlFileGenerator, build_settings_instance, _placeholder_for
+from psyplus.yaml_generator import YamlFileGenerator
 from tests.models.simple import SimpleModel
 from tests.models.nested import DatabaseConfig, NestedModel, MultiNestedModel
 from tests.models.readme_example import MyAppConfig
@@ -19,76 +19,6 @@ def _generate(model_cls) -> tuple[str, dict]:
     raw = gen.get_yaml()
     parsed = yaml.safe_load(raw)
     return raw, parsed
-
-
-# ---------------------------------------------------------------------------
-# _placeholder_for
-# ---------------------------------------------------------------------------
-
-class TestPlaceholderFor:
-    def test_str(self):
-        assert _placeholder_for(str) == ""
-
-    def test_int(self):
-        assert _placeholder_for(int) == 0
-
-    def test_float(self):
-        assert _placeholder_for(float) == 0.0
-
-    def test_bool(self):
-        assert _placeholder_for(bool) is False
-
-    def test_list(self):
-        assert _placeholder_for(list) == []
-
-    def test_typed_list(self):
-        from typing import List
-        assert _placeholder_for(List[str]) == []
-
-    def test_dict(self):
-        assert _placeholder_for(dict) == {}
-
-    def test_optional_uses_inner(self):
-        from typing import Optional
-        assert _placeholder_for(Optional[str]) == ""
-
-    def test_optional_none_only(self):
-        from typing import Optional, Union
-        assert _placeholder_for(type(None)) is None
-
-    def test_literal_returns_first_value(self):
-        from typing import Literal
-        assert _placeholder_for(Literal["A", "B"]) == "A"
-
-    def test_base_model(self):
-        from pydantic import BaseModel
-        class M(BaseModel):
-            x: str = "hi"
-            y: int  # required
-        result = _placeholder_for(M)
-        assert isinstance(result, dict)
-        assert result["x"] == "hi"
-        assert result["y"] == 0  # placeholder for required int
-
-
-# ---------------------------------------------------------------------------
-# build_settings_instance
-# ---------------------------------------------------------------------------
-
-class TestBuildSettingsInstance:
-    def test_simple_model(self):
-        inst = build_settings_instance(SimpleModel)
-        assert inst.a_string == "hello"
-        assert inst.an_int == 42
-        # required fields get placeholders
-        assert inst.required_string == ""
-        assert inst.required_list == []
-
-    def test_nested_model(self):
-        inst = build_settings_instance(NestedModel)
-        assert inst.database.host == "localhost"
-        assert inst.database.port == 5432
-        assert inst.database.name == ""  # required → empty string placeholder
 
 
 # ---------------------------------------------------------------------------
@@ -111,13 +41,14 @@ class TestFlatModelGeneration:
         _, parsed = _generate(SimpleModel)
         assert parsed["optional_none"] is None
 
-    def test_required_string_gets_empty(self):
-        _, parsed = _generate(SimpleModel)
-        assert parsed["required_string"] == ""
+    def test_required_string_is_empty(self):
+        raw, parsed = _generate(SimpleModel)
+        assert parsed["required_string"] is None
+        assert "\nrequired_string:\n" in raw
 
-    def test_required_list_gets_empty(self):
+    def test_required_list_is_empty(self):
         _, parsed = _generate(SimpleModel)
-        assert parsed["required_list"] == []
+        assert parsed["required_list"] is None
 
     def test_factory_default_evaluated(self):
         _, parsed = _generate(SimpleModel)
@@ -193,9 +124,9 @@ class TestNestedModelGeneration:
         assert parsed["database"]["host"] == "localhost"
         assert parsed["database"]["port"] == 5432
 
-    def test_nested_required_field_placeholder(self):
+    def test_nested_required_field_is_empty(self):
         _, parsed = _generate(NestedModel)
-        assert parsed["database"]["name"] == ""
+        assert parsed["database"]["name"] is None
 
     def test_nested_env_var_in_comment(self):
         raw, _ = _generate(NestedModel)
@@ -268,17 +199,17 @@ class TestReadmeExampleModel:
         assert db["host"] == "localhost"
         assert db["port"] == 5678
 
-    def test_required_admin_pw_placeholder(self):
+    def test_required_admin_pw_is_empty(self):
         _, parsed = _generate(MyAppConfig)
-        assert parsed["admin_pw"] == ""
+        assert parsed["admin_pw"] is None
 
-    def test_required_database_names_placeholder(self):
+    def test_required_database_names_is_empty(self):
         _, parsed = _generate(MyAppConfig)
-        assert parsed["database_server"]["database_names"] == []
+        assert parsed["database_server"]["database_names"] is None
 
-    def test_required_init_values_placeholder(self):
+    def test_required_init_values_is_empty(self):
         _, parsed = _generate(MyAppConfig)
-        assert parsed["init_values"] == {}
+        assert parsed["init_values"] is None
 
     def test_example_in_comment(self):
         raw, _ = _generate(MyAppConfig)

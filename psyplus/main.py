@@ -1,15 +1,27 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, Type, Union
+from typing import Generic, Literal, Type, TypeVar, Union
 
-from pydantic_settings import BaseSettings, YamlConfigSettingsSource
+from pydantic_settings import (
+    BaseSettings,
+    CliSettingsSource,
+    DotEnvSettingsSource,
+    EnvSettingsSource,
+    InitSettingsSource,
+    PydanticBaseSettingsSource,
+    SecretsSettingsSource,
+    YamlConfigSettingsSource,
+)
+from pydantic_settings.sources import DefaultSettingsSource
 
 from psyplus.markdown_generator import MarkdownDocGenerator
 from psyplus.yaml_generator import YamlFileGenerator
 
+SettingsT = TypeVar("SettingsT", bound=BaseSettings)
 
-class YamlSettingsPlus:
+
+class YamlSettingsPlus(Generic[SettingsT]):
     """Central helper for generating and reading pydantic-settings YAML configs.
 
     Args:
@@ -19,7 +31,7 @@ class YamlSettingsPlus:
 
     def __init__(
         self,
-        model: Type[BaseSettings],
+        model: Type[SettingsT],
         file_path: Union[str, Path, None] = None,
     ) -> None:
         self.model = model
@@ -84,12 +96,42 @@ class YamlSettingsPlus:
     # Read
     # ------------------------------------------------------------------
 
-    def load(self) -> BaseSettings:
-        """Load the YAML file and return a validated settings instance.
+    def load(self) -> SettingsT:
+        """Load the YAML file and return a validated instance of the model.
 
-        Environment variables (respecting the model's ``env_prefix`` /
-        ``env_nested_delimiter``) take priority over YAML file values,
-        following standard pydantic-settings source precedence.
+        The result is an instance of the model class itself
+        (``type(config) is model``), so it compares equal to and pickles like
+        an instance created directly. It is built in a single validation
+        pass: validators and ``model_post_init`` run once per call.
+
+        Sources: load() builds the sources pydantic-settings builds for the
+        model (init arguments, env vars, ``.env`` file and secrets directory,
+        each configured by the model's ``model_config``), passes them through
+        the model's own ``settings_customise_sources`` and adds the YAML file
+        after whatever that returns, so YAML values only beat the field
+        defaults. For a model without its own ``settings_customise_sources``
+        the priority is (highest first): env vars, ``.env`` file, secrets
+        directory, YAML file, defaults. load() takes no init arguments, so
+        the init source is always empty. A source the model drops in
+        ``settings_customise_sources`` (for example ``env_settings``) stays
+        dropped in load().
+
+        If the model's ``settings_customise_sources`` already returns a
+        ``YamlConfigSettingsSource`` (or a subclass of it), load() adds no
+        second one. Instead it replaces each of them, at the same position,
+        with a source that reads *file_path*. The model decides how YAML
+        ranks against the other sources, *file_path* decides which file is
+        read.
+
+        If the model's ``model_config`` sets ``cli_parse_args`` or
+        ``cli_settings_source``, command line arguments are parsed and beat
+        all other sources, as they do when the model is instantiated
+        directly.
+
+        The YAML file is read with the model's ``yaml_file_encoding``, or as
+        UTF-8 (the encoding generate_config_file() writes) when the model
+        sets none. A missing YAML file is not an error, the other sources and
+        the defaults still apply.
 
         Tip: to get similar behaviour without psyplus, set ``yaml_file`` in
         your model's ``model_config`` and add a ``YamlConfigSettingsSource``
@@ -116,33 +158,64 @@ class YamlSettingsPlus:
         """
         if self.config_file is None:
             raise ValueError("file_path must be set to load a config file.")
+        # ``_build_sources`` makes BaseSettings.__init__ use these sources
+        # instead of building its own, so the model class itself is
+        # instantiated and validated exactly once.
+        return self.model(_build_sources=(self._settings_sources(), {}))
 
-        yaml_path = self.config_file
-        base_cls = self.model
-        # The generated file is written as UTF-8, so read it as UTF-8 unless the
-        # model asks for another encoding.
-        encoding = base_cls.model_config.get("yaml_file_encoding") or "utf-8"
+    def _settings_sources(self) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Return the source chain load() hands to the model, highest priority first."""
+        model = self.model
+        yaml_source = YamlConfigSettingsSource(
+            model,
+            yaml_file=self.config_file,
+            yaml_file_encoding=model.model_config.get("yaml_file_encoding") or "utf-8",
+        )
+        sources = model.settings_customise_sources(
+            model,
+            init_settings=InitSettingsSource(model, init_kwargs={}),
+            env_settings=self._env_settings_source(),
+            dotenv_settings=DotEnvSettingsSource(model),
+            file_secret_settings=SecretsSettingsSource(model),
+        )
+        if any(isinstance(s, YamlConfigSettingsSource) for s in sources):
+            sources = tuple(
+                yaml_source if isinstance(s, YamlConfigSettingsSource) else s
+                for s in sources
+            )
+        else:
+            sources = (*sources, yaml_source)
+        return (*self._with_cli_source(sources), DefaultSettingsSource(model))
 
-        class _ModelWithYaml(base_cls):  # type: ignore[valid-type,misc]
-            @classmethod
-            def settings_customise_sources(
-                cls,
-                settings_cls: Type[BaseSettings],
-                init_settings,
-                env_settings,
-                dotenv_settings,
-                file_secret_settings,
-            ):
-                # The YAML file is the lowest file based source: env vars, the
-                # .env file and the secrets directory all override it.
-                return (
-                    init_settings,
-                    env_settings,
-                    dotenv_settings,
-                    file_secret_settings,
-                    YamlConfigSettingsSource(
-                        settings_cls, yaml_file=yaml_path, yaml_file_encoding=encoding
-                    ),
-                )
+    def _env_settings_source(self) -> PydanticBaseSettingsSource:
+        """Return the env var source passed to ``settings_customise_sources``."""
+        return EnvSettingsSource(self.model)
 
-        return _ModelWithYaml()
+    def _with_cli_source(
+        self, sources: tuple[PydanticBaseSettingsSource, ...]
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Add the command line source that the model's ``model_config`` asks for.
+
+        Mirrors what ``BaseSettings.__init__`` does with ``cli_parse_args`` and
+        ``cli_settings_source`` from ``model_config``.
+        """
+        config = self.model.model_config
+        cli_parse_args = config.get("cli_parse_args")
+        own_cli = [s for s in sources if isinstance(s, CliSettingsSource)]
+        if own_cli:
+            if cli_parse_args not in (None, False) and not own_cli[0].env_vars:
+                own_cli[0](args=cli_parse_args)
+            return sources
+        cli_source = config.get("cli_settings_source")
+        if not isinstance(cli_source, CliSettingsSource):
+            if cli_parse_args is None:
+                return sources
+            cli_source = CliSettingsSource(
+                self.model,
+                cli_parse_args=cli_parse_args,
+                cli_parse_none_str=(
+                    config.get("env_parse_none_str") or config.get("cli_parse_none_str")
+                ),
+                case_sensitive=config.get("case_sensitive"),
+            )
+        return (cli_source, *sources)

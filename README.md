@@ -408,7 +408,8 @@ sub-model's own `env_prefix` is not used for its fields. Without `env_nested_del
 fields have no env var of their own and can only be set through the JSON value of the top-level
 field. With `case_sensitive=True`, the env var names keep the case of the field names.
 A sub-model that defaults to null has no fields in the YAML file, so its comment lists the env
-vars of its fields under `Env-vars of the sub-fields:`.
+vars of its fields under `Env-vars of the sub-fields:`. For a field that holds one of several
+models (`Union[Cat, Dog]`), this list covers the fields of every model.
 
 #### Nullable fields
 

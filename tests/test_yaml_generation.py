@@ -330,3 +330,36 @@ class TestDictKeyCaseNote:
             "#           'MULTI_SERVER_MAP__<dict-key>' sets one entry, its key arrives in lower case"
         ) in raw
         assert raw.count("lower case") == 1
+
+
+class TestNullUnionOfModels:
+    def test_sub_field_env_vars_of_every_member_are_listed_once(self):
+        from typing import Literal, Optional, Union
+
+        from pydantic import BaseModel
+        from pydantic_settings import BaseSettings, SettingsConfigDict
+
+        class Cat(BaseModel):
+            kind: Literal["cat"] = "cat"
+            lives: int = 9
+
+        class Dog(BaseModel):
+            kind: Literal["dog"] = "dog"
+            bark: str = "woof"
+
+        class M(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="APP_", env_nested_delimiter="__")
+            pet: Union[Cat, Dog]
+            maybe_pet: Optional[Union[Cat, Dog]] = None
+
+        raw, parsed = _generate(M)
+        assert parsed == {"pet": None, "maybe_pet": None}
+        for field in ("pet", "maybe_pet"):
+            env = field.upper()
+            assert (
+                "# Env-vars of the sub-fields:\n"
+                f"#   {field}.kind: 'APP_{env}__KIND'\n"
+                f"#   {field}.lives: 'APP_{env}__LIVES'\n"
+                f"#   {field}.bark: 'APP_{env}__BARK'\n"
+                f"{field}:"
+            ) in raw

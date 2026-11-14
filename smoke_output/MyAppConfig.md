@@ -125,6 +125,7 @@ The names of the databases to use
 | Type | List of str |
 | Required | **Yes** |
 | Environment variable | `APP_DATABASE_SERVER__DATABASE_NAMES` |
+| Environment variable (one element) | `APP_DATABASE_SERVER__DATABASE_NAMES__<list-index>` (0 is the first; psyplus `load()` only) |
 
 **Examples:**
 

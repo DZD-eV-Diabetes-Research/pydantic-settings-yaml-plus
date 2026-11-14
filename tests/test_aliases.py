@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Dict, List, Optional
 from unittest import mock
 
@@ -350,7 +351,7 @@ def _names(model) -> dict[str, str]:
     for path, env in names.items():
         if path.endswith("]"):
             continue
-        md_path = path.replace("['first']", "[*]").replace("['k']", "[*]")
+        md_path = re.sub(r"\[\d+\]", "[*]", path.replace("['first']", "[*]").replace("['k']", "[*]"))
         assert md.get(md_path) == env, path
     return names
 
@@ -370,10 +371,11 @@ class TestEnvNames:
         assert names["opt_sub.subAlias"] == "APP_OPT_SUB__SUBALIAS"
         assert names["item_map['first'].item_size"] == "APP_ITEM_MAP__<dict-key>__ITEM_SIZE"
         assert names["REQ"] == "REQ"
-        # An AliasPath, a list element, and an upper case key below a dict (the
-        # lower cased env var name does not match it) have no env var.
+        # A list element field (read by load() itself) keeps its alias key.
+        assert names["items[0].itemName"] == "APP_ITEMS__<list-index>__ITEMNAME"
+        # An AliasPath and an upper case key below a dict (the lower cased env var name
+        # does not match it) have no env var.
         assert "outer.inner" not in names
-        assert "items[0].itemName" not in names
         assert "item_map['first'].itemName" not in names
 
     def test_prefix_target_alias(self):

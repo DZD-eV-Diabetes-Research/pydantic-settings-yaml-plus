@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import collections
+import collections.abc
 import datetime
 import enum
 import json
@@ -82,6 +84,18 @@ def clean_annotation(annotation: Any) -> Any:
     if is_optional(annotation):
         return clean_annotation(unwrap_optional(annotation))
     return annotation
+
+
+def is_list_like(annotation: Any) -> bool:
+    """True for list, tuple, set, frozenset, deque and other sequence or set annotations.
+
+    Looks through Annotated and Optional. str and bytes do not count.
+    """
+    cleaned = clean_annotation(annotation)
+    origin = get_origin(cleaned) or cleaned
+    if not isinstance(origin, type) or issubclass(origin, (str, bytes, bytearray, BaseModel)):
+        return False
+    return issubclass(origin, (collections.abc.Sequence, collections.abc.Set, collections.deque))
 
 
 def _is_enum_class(annotation: Any) -> bool:

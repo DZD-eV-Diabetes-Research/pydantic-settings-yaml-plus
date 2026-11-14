@@ -53,6 +53,7 @@ database:
   # Required:  False
   # Default:   []
   # Env-var:   'APP_DATABASE__TAGS'
+  #            'APP_DATABASE__TAGS__<list-index>' (one element, 0 is the first; psyplus load() only)
   tags: []
 
 # ## cache ###

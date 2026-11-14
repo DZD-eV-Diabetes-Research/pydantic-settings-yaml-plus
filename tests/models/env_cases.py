@@ -1,7 +1,7 @@
 """Settings models that cover the ways env var names are built (see test_env_roundtrip.py)."""
 from __future__ import annotations
 
-from typing import Annotated, Dict, List, Optional, Union
+from typing import Annotated, Dict, List, Optional, Set, Tuple, Union
 
 from pydantic import AliasChoices, AliasPath, BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -197,3 +197,51 @@ class UnionAliases(BaseSettings):
 
 class UnionAliasesByName(UnionAliases):
     model_config = SettingsConfigDict(populate_by_name=True)
+# --- single list elements (only load() reads these names) -----------------
+class Tagged(BaseModel):
+    name: str = "t"
+    tags: List[str] = ["x", "y"]
+    attrs: Dict[str, str] = {"k": "v"}
+
+
+class TagHolder(BaseModel):
+    tags: List[str] = []
+
+
+class ListCases(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="APP_", env_nested_delimiter="__")
+    tagged: List[Tagged] = [Tagged(), Tagged(name="u")]  # dicts and lists in list elements
+    groups: Dict[str, List[str]] = {"admins": ["ann", "bob"]}  # lists in dicts
+    group_items: Dict[str, List[Tagged]] = {"g": [Tagged(name="g0")]}
+    matrix: List[List[int]] = [[1, 2], [3, 4]]  # lists in lists
+    pair: Tuple[str, int] = ("p", 1)
+    many: Tuple[int, ...] = (5, 6)
+    unique: Set[str] = {"only"}
+    maybe: Optional[List[str]] = ["m"]
+    nested: TagHolder = TagHolder(tags=["d0", "d1"])  # list in a sub-model
+
+
+# --- single underscore delimiter: a list index is one more nesting level ----
+class MaxSplitLists(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="APP_", env_nested_delimiter="_", env_nested_max_split=2
+    )
+    items: List[LlmCfg] = [LlmCfg()]
+    names: List[str] = ["n0"]
+
+
+class MaxSplitOneLevel(BaseSettings):
+    """With max split 1 only the element itself has an env var, not its fields."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="APP_", env_nested_delimiter="_", env_nested_max_split=1
+    )
+    items: List[LlmCfg] = [LlmCfg()]
+    names: List[str] = ["n0"]
+
+
+class CaseSensLists(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="APP_", env_nested_delimiter="__", case_sensitive=True
+    )
+    Items: List[Item] = [Item(name="c0")]

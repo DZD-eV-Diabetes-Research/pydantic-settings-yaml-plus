@@ -21,6 +21,7 @@ A helper library that builds upon [pydantic-settings](https://docs.pydantic.dev/
     - [Useful `Field()` kwargs](#useful-field-kwargs)
     - [Configuring env vars](#configuring-env-vars)
   - [Environment variable overrides](#environment-variable-overrides)
+    - [Single list elements](#single-list-elements)
   - [Development](#development)
     - [Smoke test](#smoke-test)
     - [Running tests with coverage](#running-tests-with-coverage)
@@ -33,6 +34,7 @@ A helper library that builds upon [pydantic-settings](https://docs.pydantic.dev/
 - **Generate documented YAML** — each field gets a comment block with its type, required flag, default value, allowed enum values, corresponding environment variable, description, and examples.
 - **Nested models** — `BaseModel` sub-models are rendered as indented YAML sections with full comment headers.
 - **Read back with env-var override** — `load()` loads the YAML file and still applies environment variable overrides using pydantic-settings' standard machinery.
+- **Single list elements from env vars:** `load()` also reads env vars like `APP_SERVERS__0__HOST` that change one element of a list from the YAML file.
 - **Markdown docs** — generate a Markdown reference document straight from your settings class.
 - **Zero boilerplate** — define your settings in a standard `pydantic_settings.BaseSettings` subclass; psyplus does the rest.
 
@@ -195,6 +197,7 @@ database_server:
   # Type:        List of str
   # Required:    True
   # Env-var:     'APP_DATABASE_SERVER__DATABASE_NAMES'
+  #              'APP_DATABASE_SERVER__DATABASE_NAMES__<list-index>' (one element, 0 is the first; psyplus load() only)
   # Description: The names of the databases to use
   # Example:
   #  >database_names:
@@ -327,7 +330,7 @@ These files are regenerated automatically by the smoke script (`pdm run smoke`) 
 | `generate_markdown_doc(output_path)` | Write a Markdown reference document to `output_path`. |
 | `render_yaml() → str` | Render the documented YAML as a string without touching the filesystem. |
 | `render_markdown() → str` | Render the Markdown reference document as a string without touching the filesystem. |
-| `load() → model` | Load `file_path`, apply env var overrides, return a validated instance of `model`. |
+| `load() → model` | Load `file_path`, apply env var overrides (including [single list elements](#single-list-elements)), return a validated instance of `model`. |
 
 ### `YamlFileGenerator(settings_class, indent_size=2)`
 
@@ -400,13 +403,16 @@ What pydantic-settings can set through env vars, and what the generated files sh
 |---|---|---|
 | Field of a nested model, any depth | `MYAPP_DATABASE__SERVER__HOST=db` | Sets only this value. The other values from the YAML file stay. |
 | Whole nested model | `MYAPP_DATABASE='{"name": "x"}'` | JSON, merged into the values from the YAML file. |
-| List (`List[str]`, `List[SubModel]`) | `MYAPP_HOSTS='["a", "b"]'` | JSON, replaces the whole list. A single list element (`MYAPP_HOSTS__0`) can not be set, so list elements show no env var. |
+| List (`List[str]`, `List[SubModel]`, tuple, set) | `MYAPP_HOSTS='["a", "b"]'` | JSON, replaces the whole list. |
+| One list element, or a field of it | `MYAPP_HOSTS__1=b`, `MYAPP_SERVERS__0__PORT=8080` | Only with `load()`, see [Single list elements](#single-list-elements). `<list-index>` stands for the position, 0 is the first. Changes this element of the list from the YAML file, the other elements stay. |
 | Dict value (`Dict[str, ...]`) | `MYAPP_LABELS__team=core` | `<dict-key>` stands for the key. Env var names are case-insensitive by default, so the key arrives in lower case, and the generated files say so next to the env var of the dict field. Keys in a JSON value keep their case. |
 
 Only the root model's `env_prefix` and `env_nested_delimiter` count. A nested `BaseSettings`
 sub-model's own `env_prefix` is not used for its fields. Without `env_nested_delimiter`, nested
 fields have no env var of their own and can only be set through the JSON value of the top-level
-field. With `case_sensitive=True`, the env var names keep the case of the field names.
+field. With `case_sensitive=True`, the env var names keep the case of the field names. With
+`env_nested_max_split`, only fields that many levels below the top-level field have an env var
+(a list index counts as a level).
 A sub-model that defaults to null has no fields in the YAML file, so its comment lists the env
 vars of its fields under `Env-vars of the sub-fields:`. For a field that holds one of several
 models (`Union[Cat, Dog]`), this list covers the fields of every model.
@@ -501,6 +507,32 @@ If your model defines `settings_customise_sources`, `load()` respects it: the YA
 Command line parsing configured in `model_config` (`cli_parse_args`, `cli_settings_source`) also applies to `load()`, with the command line beating all other sources.
 
 A missing YAML file is not an error: `load()` then returns the model defaults plus whatever the env vars, the `.env` file and the secrets directory set.
+
+### Single list elements
+
+pydantic-settings itself can only replace a whole list through an env var (`APP_SERVERS='[{"host": "a"}]'`). `load()` also reads env vars that address one element by its position, in the environment and in the `.env` file:
+
+```bash
+export APP_SERVERS__0__HOST=db.internal   # field of the first element
+export APP_TAGS__1=beta                   # second element of a List[str]
+export APP_GROUPS__admins__0=ann          # list inside a dict
+export APP_MATRIX__1__0=7                 # list inside a list
+```
+
+The generated YAML comments and Markdown docs show these names with `<list-index>` in place of the position (`APP_SERVERS__<list-index>__HOST`). They work with `load()` only: a model instantiated directly (`MyAppConfig()`) reads them the way pydantic-settings does, which fails list validation.
+
+The env var changes the list that the lower priority sources provide (usually the YAML file) instead of replacing it:
+
+- **Index below the list length:** changes that element. The fields of an element model are merged into it (`APP_SERVERS__0__HOST` keeps the element's `port`), the same goes for a JSON object (`APP_SERVERS__0='{"host": "x"}'`). Any other value replaces the element.
+- **Index equal to the list length:** adds an element. Several new elements need consecutive indices (2, 3, 4 for a list of two). A new element that is a model needs its required fields set too.
+- **Index further beyond the end:** `load()` fails with an error that names the env var.
+- **List not in the YAML file:** the env var changes the field's default list. A field without a default (or with `null`) starts as an empty list, so its indices start at 0.
+- **Aliases:** the list is found in the YAML file under the field name or any of its aliases, and the changed list stays under that key.
+- **Whole list and elements together:** an index env var changes the whole list value from the same place (`APP_TAGS='["a", "b"]'` plus `APP_TAGS__1=c` gives `["a", "c"]`). A whole value that is not a JSON list there (a comma separated string for a `NoDecode` field, for example) can not be changed this way, `load()` fails with an error. A whole list from a higher priority source replaces everything below it, as usual.
+- **Not a list index:** `-1` or `01` where a list is expected is an error that names the env var. Other names (`APP_TAGS__NAME`) are left to pydantic-settings, as without psyplus.
+- **Tuples and sets** work like lists. For a set, the index counts the elements in the order the YAML file lists them.
+
+Only the env and `.env` sources that `load()` hands to your model's `settings_customise_sources` (`env_settings`, `dotenv_settings`) read list indices. A source your model builds itself (`EnvSettingsSource(settings_cls, env_prefix=...)`) works as pydantic-settings makes it, without list index support.
 
 ---
 

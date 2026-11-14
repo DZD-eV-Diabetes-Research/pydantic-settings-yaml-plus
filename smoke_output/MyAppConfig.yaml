@@ -69,6 +69,7 @@ database_server:
   # Type:        List of str
   # Required:    True
   # Env-var:     'APP_DATABASE_SERVER__DATABASE_NAMES'
+  #              'APP_DATABASE_SERVER__DATABASE_NAMES__<list-index>' (one element, 0 is the first; psyplus load() only)
   # Description: The names of the databases to use
   # Example:
   #  >database_names:

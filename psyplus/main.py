@@ -6,8 +6,6 @@ from typing import Generic, Literal, Type, TypeVar, Union
 from pydantic_settings import (
     BaseSettings,
     CliSettingsSource,
-    DotEnvSettingsSource,
-    EnvSettingsSource,
     InitSettingsSource,
     PydanticBaseSettingsSource,
     SecretsSettingsSource,
@@ -16,6 +14,11 @@ from pydantic_settings import (
 from pydantic_settings.sources import DefaultSettingsSource
 
 from psyplus.markdown_generator import MarkdownDocGenerator
+from psyplus.sources import (
+    ListIndexDotEnvSettingsSource,
+    ListIndexEnvSettingsSource,
+    resolve_list_patches,
+)
 from psyplus.yaml_generator import YamlFileGenerator
 
 SettingsT = TypeVar("SettingsT", bound=BaseSettings)
@@ -123,6 +126,16 @@ class YamlSettingsPlus(Generic[SettingsT]):
         ranks against the other sources, *file_path* decides which file is
         read.
 
+        Env vars (and ``.env`` file entries) can also change a single list
+        element, which plain pydantic-settings can not:
+        ``APP_ITEMS__0__NAME=x`` changes the first element of the ``items``
+        list that the lower priority sources (usually the YAML file) set, the
+        other elements stay. An index equal to the list length adds an
+        element, a larger one is an error. Only the env and ``.env`` sources
+        load() passes to the model's ``settings_customise_sources`` read these
+        names; a source the model builds itself works as pydantic-settings
+        makes it. See ``psyplus.sources`` for all rules.
+
         If the model's ``model_config`` sets ``cli_parse_args`` or
         ``cli_settings_source``, command line arguments are parsed and beat
         all other sources, as they do when the model is instantiated
@@ -161,7 +174,8 @@ class YamlSettingsPlus(Generic[SettingsT]):
         # ``_build_sources`` makes BaseSettings.__init__ use these sources
         # instead of building its own, so the model class itself is
         # instantiated and validated exactly once.
-        return self.model(_build_sources=(self._settings_sources(), {}))
+        sources = resolve_list_patches(self.model, self._settings_sources())
+        return self.model(_build_sources=(sources, {}))
 
     def _settings_sources(self) -> tuple[PydanticBaseSettingsSource, ...]:
         """Return the source chain load() hands to the model, highest priority first."""
@@ -175,7 +189,7 @@ class YamlSettingsPlus(Generic[SettingsT]):
             model,
             init_settings=InitSettingsSource(model, init_kwargs={}),
             env_settings=self._env_settings_source(),
-            dotenv_settings=DotEnvSettingsSource(model),
+            dotenv_settings=ListIndexDotEnvSettingsSource(model),
             file_secret_settings=SecretsSettingsSource(model),
         )
         if any(isinstance(s, YamlConfigSettingsSource) for s in sources):
@@ -188,8 +202,12 @@ class YamlSettingsPlus(Generic[SettingsT]):
         return (*self._with_cli_source(sources), DefaultSettingsSource(model))
 
     def _env_settings_source(self) -> PydanticBaseSettingsSource:
-        """Return the env var source passed to ``settings_customise_sources``."""
-        return EnvSettingsSource(self.model)
+        """Return the env var source passed to ``settings_customise_sources``.
+
+        It also reads env vars that set a single list element (``APP_ITEMS__0__NAME``),
+        see ``psyplus.sources``.
+        """
+        return ListIndexEnvSettingsSource(self.model)
 
     def _with_cli_source(
         self, sources: tuple[PydanticBaseSettingsSource, ...]

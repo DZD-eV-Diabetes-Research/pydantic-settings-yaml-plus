@@ -213,6 +213,12 @@ class MarkdownDocGenerator:
             if notes:
                 env_cell += f" ({'; '.join(notes)})"
             rows.append(("Environment variable", env_cell))
+            element_env_var = container.get_list_element_env_var()
+            if element_env_var:
+                rows.append((
+                    "Environment variable (one element)",
+                    f"`{element_env_var}` (0 is the first; psyplus `load()` only)",
+                ))
 
         if rows:
             lines.append("| Property | Value |")

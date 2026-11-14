@@ -169,6 +169,23 @@ class TestMultiNestedGeneration:
         assert parsed["server_map"]["primary"]["host"] == "primary.example.com"
         assert parsed["server_map"]["primary"]["port"] == 443
 
+    def test_list_field_comment_shows_env_var_for_one_element(self):
+        raw, _ = _generate(MultiNestedModel)
+        assert (
+            "# Env-var:  'MULTI_SERVERS'\n"
+            "#           'MULTI_SERVERS__<list-index>' "
+            "(one element, 0 is the first; psyplus load() only)\n"
+            "servers:"
+        ) in raw
+        # Dicts get no such line, nor do lists without env_nested_delimiter.
+        assert "MULTI_SERVER_MAP__<list-index>" not in raw
+        assert "<list-index>" not in _generate(SimpleModel)[0]
+
+    def test_list_elements_show_env_var_with_list_index(self):
+        raw, _ = _generate(MultiNestedModel)
+        assert raw.count("# Env-var:   'MULTI_SERVERS__<list-index>'\n") == 2
+        assert raw.count("# Env-var:   'MULTI_SERVERS__<list-index>__HOST'\n") == 2
+
 
 # ---------------------------------------------------------------------------
 # YamlFileGenerator — README example model

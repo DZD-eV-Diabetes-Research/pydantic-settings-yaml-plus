@@ -12,6 +12,7 @@ This document is auto-generated from the pydantic-settings model. All settings c
 | Required | No |
 | Default | `[{"host": "a.example.com", "port": 80}, {"host": "b.example.com", "port": 80}]` |
 | Environment variable | `MULTI_SERVERS` |
+| Environment variable (one element) | `MULTI_SERVERS__<list-index>` (0 is the first; psyplus `load()` only) |
 
 ---
 
@@ -25,6 +26,7 @@ This document is auto-generated from the pydantic-settings model. All settings c
 |---|---|
 | Type | str |
 | Required | **Yes** |
+| Environment variable | `MULTI_SERVERS__<list-index>__HOST` |
 
 ---
 
@@ -35,6 +37,7 @@ This document is auto-generated from the pydantic-settings model. All settings c
 | Type | int |
 | Required | No |
 | Default | `80` |
+| Environment variable | `MULTI_SERVERS__<list-index>__PORT` |
 
 ---
 

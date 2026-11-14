@@ -15,6 +15,7 @@ from psyplus.utils import (
     get_literal_list,
     get_str_dict_as_table,
     has_literal,
+    is_list_like,
     is_nullable,
     is_optional,
     model_members,
@@ -26,6 +27,9 @@ from psyplus.utils import (
 
 log = logging.getLogger(__name__)
 
+ENV_VAR_LISTINDEX_PLACEHOLDER = "<list-index>"
+# Shown after the env var of one list element (``APP_TAGS__<list-index>``).
+LIST_ELEMENT_ENV_VAR_NOTE = "(one element, 0 is the first; psyplus load() only)"
 ENV_VAR_DICTKEY_PLACEHOLDER = "<dict-key>"
 # Stands for "any element" in a path, e.g. ``servers[*].host`` in the Markdown doc.
 ANY_ITEM = "*"
@@ -235,12 +239,13 @@ class FieldInfoContainer:
         return self.annotation
 
     def get_env_var(self) -> str | None:
-        """The env var that sets this field, or None when pydantic-settings offers none.
+        """The env var that sets this field, or None when there is none.
 
-        pydantic-settings can not set a single list element: ``APP_ITEMS__0`` is read
-        as the dict ``{"0": ...}`` and fails list validation, so list elements only
-        change through the JSON value of the whole list. Without
-        ``env_nested_delimiter`` only top-level fields have an env var.
+        A list element gets ``<list-index>`` in its name (``APP_ITEMS__<list-index>__NAME``).
+        Plain pydantic-settings can not read such names, ``YamlSettingsPlus.load()`` can
+        (see ``psyplus.sources``). Without ``env_nested_delimiter`` only top-level fields
+        have an env var, and with ``env_nested_max_split`` only fields that many levels
+        below the top-level field.
 
         A field with an alias is named by its alias, and ``env_prefix`` goes in front
         of the top-level key only where ``env_prefix_target`` says so: ``"variable"``
@@ -255,10 +260,11 @@ class FieldInfoContainer:
         if not case_sensitive:
             prefix = prefix.upper()
 
-        if any(isinstance(segment, ListIndex) for segment in self.path):
-            return None
         if any(isinstance(segment, FieldKey) and segment.in_alias_path for segment in self.path):
             return None
+        # An env var with a list index is read by psyplus.sources, which matches field
+        # keys at any depth itself and files the value under the key the YAML file uses.
+        has_list_index = any(isinstance(segment, ListIndex) for segment in self.path)
 
         if len(self.path) > 1 and not delimiter:
             if (
@@ -275,7 +281,11 @@ class FieldInfoContainer:
                 )
             return None
 
-        if not case_sensitive and not _env_keys_match_case_insensitively(self.path):
+        if (
+            not case_sensitive
+            and not has_list_index
+            and not _env_keys_match_case_insensitively(self.path)
+        ):
             return None
 
         top = self.path[0]
@@ -283,6 +293,7 @@ class FieldInfoContainer:
         if (
             top_is_alias
             and len(self.path) > 1
+            and not has_list_index
             and (config.get("populate_by_name") or config.get("validate_by_name"))
         ):
             # pydantic-settings files these env vars under the field name, next to the
@@ -292,10 +303,16 @@ class FieldInfoContainer:
         if prefix_target not in (("alias", "all") if top_is_alias else ("variable", "all")):
             prefix = ""
 
+        max_split = config.get("env_nested_max_split")
+        if max_split and len(self.path) - 1 > max_split:
+            return None
+
         parts: list[str] = []
         for segment in self.path:
             if isinstance(segment, str):
                 parts.append(segment if case_sensitive else segment.upper())
+            elif isinstance(segment, ListIndex):
+                parts.append(ENV_VAR_LISTINDEX_PLACEHOLDER)
             else:
                 parts.append(ENV_VAR_DICTKEY_PLACEHOLDER)
         return prefix + delimiter.join(parts)
@@ -321,6 +338,20 @@ class FieldInfoContainer:
             field_name=ENV_VAR_DICTKEY_PLACEHOLDER,
             root_settings_class=self.root_settings_class,
         ).get_env_var()
+
+    def get_list_element_env_var(self) -> str | None:
+        """For a list field, the env var that sets one element (``APP_TAGS__<list-index>``).
+
+        Only ``YamlSettingsPlus.load()`` reads these names.
+        """
+        if not is_list_like(self.get_annotation()):
+            return None
+        element = FieldInfoContainer(
+            path=self.path + [ListIndex(index=ANY_ITEM)],
+            field_name=self.field_name,
+            root_settings_class=self.root_settings_class,
+        )
+        return element.get_env_var()
 
     def get_path_str(self) -> str:
         return path_to_str(self.path)
@@ -441,6 +472,12 @@ class FieldInfoContainer:
             entry_env_var = self.get_lowercased_dict_entry_env_var()
             if entry_env_var:
                 data["Env-var:"] += f"\n'{entry_env_var}' sets one entry, its key arrives in lower case"
+
+        element_env_var = self.get_list_element_env_var() if env_var else None
+        if element_env_var:
+            data["Env-var:"] += (
+                f"\n'{element_env_var}' {LIST_ELEMENT_ENV_VAR_NOTE}"
+            )
 
         if fi.description:
             data["Description:"] = fi.description

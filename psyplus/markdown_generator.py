@@ -1,17 +1,15 @@
 from __future__ import annotations
 
 import inspect
-import json
 import logging
 from typing import Any, get_args, get_origin
 
 from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
 from pydantic_settings import BaseSettings
-import yaml
 
-from psyplus.field_info import DictKey, FieldInfoContainer, ListIndex
-from psyplus.utils import clean_annotation, nested_pydantic_to_dict
+from psyplus.field_info import ANY_ITEM, DictKey, FieldInfoContainer, ListIndex, path_to_str
+from psyplus.utils import clean_annotation, readable_constraints, to_json_text, to_yaml_text
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +41,9 @@ class MarkdownDocGenerator:
         parent_path: list[str | ListIndex | DictKey],
         heading_level: int,
         lines: list[str],
+        _seen: tuple[type[BaseModel], ...] = (),
     ) -> None:
+        _seen = _seen + (cls,)
         for key, fi in cls.model_fields.items():
             path = parent_path + [key]
             container = FieldInfoContainer(
@@ -59,9 +59,9 @@ class MarkdownDocGenerator:
             if not annotation:
                 continue
             nested_cls, item_path = self._extract_nested(annotation, parent_path, key)
-            if nested_cls is not None:
+            if nested_cls is not None and nested_cls not in _seen:
                 lines.extend(self._item_schema_intro(key, nested_cls, item_path, heading_level + 1))
-                self._walk_model(nested_cls, item_path, heading_level + 1, lines)
+                self._walk_model(nested_cls, item_path, heading_level + 1, lines, _seen)
 
     def _extract_nested(
         self,
@@ -87,12 +87,12 @@ class MarkdownDocGenerator:
         if origin is list and args:
             inner = args[0]
             if inspect.isclass(inner) and issubclass(inner, BaseModel):
-                return inner, parent_path + [f"{key}[*]"]
+                return inner, path + [ListIndex(index=ANY_ITEM)]
 
         if origin is dict and len(args) >= 2:
             inner = args[1]
             if inspect.isclass(inner) and issubclass(inner, BaseModel):
-                return inner, parent_path + [f"{key}[*]"]
+                return inner, path + [DictKey(key=ANY_ITEM)]
 
         return None, []
 
@@ -106,7 +106,7 @@ class MarkdownDocGenerator:
         """Emit a small intro heading when recursing into a list/dict item schema."""
         # Direct sub-model already has its own field section as the intro — no extra header needed.
         # Only add one for list/dict item types where the parent section describes the collection.
-        path_str = ".".join(str(p) for p in item_path)
+        path_str = path_to_str(item_path)
         if path_str == field_key:
             return []
         hashes = "#" * heading_level
@@ -141,23 +141,15 @@ class MarkdownDocGenerator:
             if fi.default is None:
                 rows.append(("Default", "`null`"))
             else:
-                try:
-                    rows.append(("Default", f"`{json.dumps(nested_pydantic_to_dict(fi.default))}`"))
-                except Exception:
-                    rows.append(("Default", f"`{fi.default}`"))
+                rows.append(("Default", f"`{to_json_text(fi.default)}`"))
 
         enum_vals = container.get_enum_vals()
         if enum_vals:
             rows.append(("Allowed values", " · ".join(f"`{v}`" for v in enum_vals)))
 
-        if fi.metadata:
-            readable = [
-                str(m)
-                for m in fi.metadata
-                if not str(m).startswith("annotated_types") and str(m) != ""
-            ]
-            if readable:
-                rows.append(("Constraints", ", ".join(readable)))
+        constraints = readable_constraints(fi.metadata)
+        if constraints:
+            rows.append(("Constraints", constraints))
 
         env_var = container.get_env_var()
         if env_var:
@@ -174,6 +166,7 @@ class MarkdownDocGenerator:
             lines.append("| Property | Value |")
             lines.append("|---|---|")
             for k, v in rows:
+                v = v.replace("|", "\\|")
                 lines.append(f"| {k} | {v} |")
             lines.append("")
 
@@ -183,10 +176,7 @@ class MarkdownDocGenerator:
                 if len(fi.examples) > 1:
                     lines.append(f"*Example {i + 1}:*\n")
                 try:
-                    as_yaml = yaml.dump(
-                        nested_pydantic_to_dict({container.field_name: example}),
-                        sort_keys=False,
-                    )
+                    as_yaml = to_yaml_text({container.field_name: example})
                     lines.append(f"```yaml\n{as_yaml.rstrip()}\n```\n")
                 except Exception:
                     lines.append(f"```\n{repr(example)}\n```\n")

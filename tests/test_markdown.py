@@ -1,5 +1,9 @@
 """Tests for psyplus/markdown_generator.py — MarkdownDocGenerator."""
+from typing import List
+
 import pytest
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
 
 from psyplus.markdown_generator import MarkdownDocGenerator
 from tests.models.simple import SimpleModel
@@ -153,6 +157,17 @@ class TestCollectionNestedRecursion:
         assert "server_map[*].host" in doc
         assert "server_map[*].port" in doc
 
+    def test_dict_item_env_var_uses_placeholder(self):
+        doc = _generate(MultiNestedModel)
+        assert "`MULTI_SERVER_MAP__<dict-key>__HOST`" in doc
+        assert "[*]__" not in doc
+
+    def test_list_item_fields_have_no_env_var(self):
+        # pydantic-settings can not set a single list element
+        doc = _generate(MultiNestedModel)
+        assert "MULTI_SERVERS__" not in doc
+        assert "MULTI_SERVERS[" not in doc
+
     def test_sub_fields_have_property_tables(self):
         doc = _generate(MultiNestedModel)
         # Each sub-field section should include a property table
@@ -164,3 +179,29 @@ class TestCollectionNestedRecursion:
         assert "database.host" in doc
         assert "database.port" in doc
         assert "database[*]" not in doc
+
+
+class _Node(BaseModel):
+    name: str = "n"
+    children: List["_Node"] = []
+
+
+_Node.model_rebuild()
+
+
+class TestMarkdownEdgeCases:
+    def test_self_referencing_model_does_not_recurse_forever(self):
+        class Tree(BaseSettings):
+            root: _Node = _Node()
+
+        doc = _generate(Tree)
+        assert "`root.children`" in doc
+        # The item schema of _Node is already documented under `root`.
+        assert "root.children[*]" not in doc
+
+    def test_pipe_in_table_cell_is_escaped(self):
+        class Piped(BaseSettings):
+            sep: str = Field(default="a|b")
+
+        doc = _generate(Piped)
+        assert '`"a\\|b"`' in doc

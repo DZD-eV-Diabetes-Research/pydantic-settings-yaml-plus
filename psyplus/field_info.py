@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
 from dataclasses import dataclass
@@ -10,26 +9,32 @@ from pydantic import BaseModel
 from pydantic import fields as pydantic_fields
 from pydantic_core import PydanticUndefined
 from pydantic_settings import BaseSettings
-import yaml
 
 from psyplus.utils import (
+    clean_annotation,
     get_literal_list,
     get_str_dict_as_table,
     has_literal,
     is_nullable,
-    nested_pydantic_to_dict,
     python_annotation_to_readable,
+    readable_constraints,
+    to_json_text,
+    to_yaml_text,
 )
 
 log = logging.getLogger(__name__)
 
 ENV_VAR_LISTINDEX_PLACEHOLDER = "<list-index>"
 ENV_VAR_DICTKEY_PLACEHOLDER = "<dict-key>"
+# Stands for "any element" in a path, e.g. ``servers[*].host`` in the Markdown doc.
+ANY_ITEM = "*"
+
+_warned_no_delimiter: set[type] = set()
 
 
 @dataclass
 class ListIndex:
-    index: int
+    index: int | str
 
     def __str__(self) -> str:
         return f"[{self.index}]"
@@ -40,7 +45,20 @@ class DictKey:
     key: Any
 
     def __str__(self) -> str:
+        if self.key == ANY_ITEM:
+            return "[*]"
         return f"['{self.key}']"
+
+
+def path_to_str(path: list[str | ListIndex | DictKey]) -> str:
+    """``["servers", ListIndex(0), "host"]`` -> ``servers[0].host``."""
+    out = ""
+    for segment in path:
+        if isinstance(segment, str):
+            out += f".{segment}" if out else segment
+        else:
+            out += str(segment)
+    return out
 
 
 @dataclass
@@ -60,31 +78,48 @@ class FieldInfoContainer:
         return self.annotation
 
     def get_env_var(self) -> str | None:
+        """The env var that sets this field, or None when pydantic-settings offers none.
+
+        pydantic-settings can not set a single list element: ``APP_ITEMS__0`` is read
+        as the dict ``{"0": ...}`` and fails list validation, so list elements only
+        change through the JSON value of the whole list. Without
+        ``env_nested_delimiter`` only top-level fields have an env var.
+        """
         config = self.root_settings_class.model_config
         delimiter = config.get("env_nested_delimiter") or ""
+        case_sensitive = bool(config.get("case_sensitive", False))
         prefix = config.get("env_prefix") or ""
+        if not case_sensitive:
+            prefix = prefix.upper()
+
+        if any(isinstance(segment, ListIndex) for segment in self.path):
+            return None
 
         if len(self.path) > 1 and not delimiter:
-            if not os.getenv("PSYPLUS_SUPPRESS_ENV_WARNING"):
+            if (
+                not os.getenv("PSYPLUS_SUPPRESS_ENV_WARNING")
+                and self.root_settings_class not in _warned_no_delimiter
+            ):
+                _warned_no_delimiter.add(self.root_settings_class)
                 log.warning(
-                    f"Nested model without `env_nested_delimiter` configured on "
-                    f"`{self.root_settings_class.__name__}`. "
+                    f"`{self.root_settings_class.__name__}` has nested fields but no "
+                    "`env_nested_delimiter`, so they can only be set through the JSON value "
+                    "of their top-level env var. "
                     "Set env var PSYPLUS_SUPPRESS_ENV_WARNING=true to silence this warning. "
-                    "See https://docs.pydantic.dev/latest/concepts/pydantic_settings/#nested-model-default-partial-updates"
+                    "See https://docs.pydantic.dev/latest/concepts/pydantic_settings/#parsing-environment-variable-values"
                 )
+            return None
 
         parts: list[str] = []
         for segment in self.path:
             if isinstance(segment, str):
-                parts.append(segment.upper())
-            elif isinstance(segment, ListIndex):
-                parts.append(ENV_VAR_LISTINDEX_PLACEHOLDER)
+                parts.append(segment if case_sensitive else segment.upper())
             else:
                 parts.append(ENV_VAR_DICTKEY_PLACEHOLDER)
         return prefix + delimiter.join(parts)
 
     def get_path_str(self) -> str:
-        return ".".join(str(p) for p in self.path)
+        return path_to_str(self.path)
 
     def get_type_string(self) -> str | None:
         type_str = python_annotation_to_readable(self.get_annotation())
@@ -114,8 +149,45 @@ class FieldInfoContainer:
             return get_literal_list(self.get_annotation())
         return None
 
-    def build_comment_lines(self, overwrite_required: bool | None = None) -> list[str]:
-        """Build the list of lines that form the YAML comment block above a key."""
+    def get_sub_field_env_vars(self) -> list[tuple[str, str]]:
+        """``(path, env var)`` for the fields of this field's sub-model, recursively.
+
+        Only direct sub-models are followed (``Optional[Model]`` included); fields
+        without an env var of their own (list elements, no ``env_nested_delimiter``)
+        are left out.
+        """
+        out: list[tuple[str, str]] = []
+
+        def walk(container: FieldInfoContainer, seen: tuple[type, ...]) -> None:
+            cls = clean_annotation(container.get_annotation())
+            if not (isinstance(cls, type) and issubclass(cls, BaseModel)) or cls in seen:
+                return
+            for key, fi in cls.model_fields.items():
+                child = FieldInfoContainer(
+                    path=container.path + [key],
+                    field_name=key,
+                    field_info=fi,
+                    root_settings_class=self.root_settings_class,
+                )
+                env_var = child.get_env_var()
+                if env_var:
+                    out.append((child.get_path_str(), env_var))
+                walk(child, seen + (cls,))
+
+        walk(self, ())
+        return out
+
+    def build_comment_lines(
+        self,
+        overwrite_required: bool | None = None,
+        list_sub_field_env_vars: bool = False,
+    ) -> list[str]:
+        """Build the list of lines that form the YAML comment block above a key.
+
+        ``list_sub_field_env_vars`` adds the env vars of the sub-model's fields. The
+        YAML generator sets it when the sub-model is null, because its fields (and
+        their comments) are then not written to the file.
+        """
         fi = self.field_info or pydantic_fields.FieldInfo()
         key = self.field_name
         path = self.get_path_str()
@@ -141,24 +213,15 @@ class FieldInfoContainer:
             if fi.default is None:
                 data["Default:"] = "null"
             else:
-                try:
-                    data["Default:"] = json.dumps(nested_pydantic_to_dict(fi.default))
-                except Exception:
-                    data["Default:"] = str(fi.default)
+                data["Default:"] = to_json_text(fi.default)
 
         enum_vals = self.get_enum_vals()
         if enum_vals is not None:
             data["Allowed vals:"] = str(enum_vals)
 
-        if fi.metadata:
-            # Filter out internal pydantic metadata objects that add no user value
-            readable = [
-                str(m)
-                for m in fi.metadata
-                if not str(m).startswith("annotated_types") and str(m) != ""
-            ]
-            if readable:
-                data["Constraints:"] = ", ".join(readable)
+        constraints = readable_constraints(fi.metadata)
+        if constraints:
+            data["Constraints:"] = constraints
 
         env_var = self.get_env_var()
         if env_var:
@@ -178,6 +241,12 @@ class FieldInfoContainer:
         if table:
             lines.extend(table.split("\n"))
 
+        if list_sub_field_env_vars:
+            sub_env_vars = self.get_sub_field_env_vars()
+            if sub_env_vars:
+                lines.append("Env-vars of the sub-fields:")
+                lines.extend(f"  {sub_path}: '{env}'" for sub_path, env in sub_env_vars)
+
         if fi.examples:
             lines.extend(self._example_lines(key))
 
@@ -192,9 +261,7 @@ class FieldInfoContainer:
             label = f"Example No. {i + 1}:" if len(examples) > 1 else "Example:"
             lines.append(label)
             try:
-                as_yaml = yaml.dump(
-                    nested_pydantic_to_dict({key: example}), sort_keys=False
-                )
+                as_yaml = to_yaml_text({key: example})
                 for line in as_yaml.rstrip("\n").split("\n"):
                     lines.append(f" >{line}")
             except Exception:

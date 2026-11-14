@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime
+import enum
+import json
 from typing import Annotated, Any, Generator, Literal, Union, cast, get_args, get_origin
 
 from pydantic import (
@@ -11,7 +13,9 @@ from pydantic import (
     PastDate,
     PastDatetime,
 )
-from pydantic import BaseModel
+from pydantic import AfterValidator, BaseModel, BeforeValidator, PlainValidator, WrapValidator
+from pydantic_core import to_jsonable_python
+import yaml
 from pydantic_settings import BaseSettings
 
 # Python 3.10-3.13: `X | Y` creates types.UnionType (distinct from typing.Union).
@@ -79,16 +83,23 @@ def clean_annotation(annotation: Any) -> Any:
     return annotation
 
 
+def _is_enum_class(annotation: Any) -> bool:
+    return isinstance(annotation, type) and issubclass(annotation, enum.Enum)
+
+
 def has_literal(annotation: Any) -> bool:
-    """Return True if annotation is or wraps a Literal type."""
-    return get_origin(clean_annotation(annotation)) is Literal
+    """Return True if annotation is or wraps a Literal type or an Enum class."""
+    cleaned = clean_annotation(annotation)
+    return get_origin(cleaned) is Literal or _is_enum_class(cleaned)
 
 
 def get_literal_list(annotation: Any) -> list[Any] | None:
-    """Return the list of values in a Literal annotation, or None."""
+    """Return the allowed values of a Literal annotation or Enum class, or None."""
     cleaned = clean_annotation(annotation)
     if get_origin(cleaned) is Literal:
         return list(get_args(cleaned))
+    if _is_enum_class(cleaned):
+        return [member.value for member in cleaned]
     return None
 
 
@@ -104,7 +115,7 @@ def python_annotation_to_readable(annotation: Any) -> str | None:
                     parts.append(s)
             return ", ".join(parts) if parts else None
 
-        if is_optional(annot):
+        if is_optional(annot) or get_origin(annot) is Annotated:
             return _stringify(clean_annotation(annot))
 
         if annot is Any or annot is None:
@@ -115,8 +126,8 @@ def python_annotation_to_readable(annotation: Any) -> str | None:
 
         origin = get_origin(annot)
 
-        if origin is list or annot is list:
-            args = get_args(annot)
+        if origin in (list, set, frozenset, tuple) or annot in (list, set, frozenset, tuple):
+            args = tuple(a for a in get_args(annot) if a is not Ellipsis)
             inner = _stringify(args) if args else None
             return f"List of {inner}" if inner else "List"
 
@@ -125,11 +136,18 @@ def python_annotation_to_readable(annotation: Any) -> str | None:
             inner = _stringify(args) if args else None
             return f"Dictionary of ({inner})" if inner else "Dictionary"
 
-        if origin is Literal:
+        if origin is Literal or _is_enum_class(annot):
             return "Enum"
+
+        if is_union(annot):
+            parts = [s for s in (_stringify(a) for a in get_args(annot)) if s]
+            return " or ".join(parts) if parts else None
 
         if isinstance(annot, type) and issubclass(annot, (BaseModel, BaseSettings)):
             return f"Object ({annot.__name__})"
+
+        if isinstance(annot, type):
+            return annot.__name__
 
         return "Object"
 
@@ -137,14 +155,34 @@ def python_annotation_to_readable(annotation: Any) -> str | None:
 
 
 def nested_pydantic_to_dict(obj: Any) -> Any:
-    """Recursively convert pydantic models to plain dicts."""
-    if isinstance(obj, (BaseModel, BaseSettings)):
-        return nested_pydantic_to_dict(obj.model_dump())
-    if isinstance(obj, dict):
-        return {k: nested_pydantic_to_dict(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [nested_pydantic_to_dict(item) for item in obj]
-    return obj
+    """Convert pydantic models (and Enum, Path, datetime, ...) to plain JSON-compatible data."""
+    return to_jsonable_python(obj)
+
+
+def to_json_text(obj: Any) -> str:
+    """Render a default value as JSON, the way it is written to the YAML file."""
+    try:
+        return json.dumps(to_jsonable_python(obj), ensure_ascii=False)
+    except Exception:
+        return str(obj)
+
+
+def to_yaml_text(obj: Any) -> str:
+    """Render an example as YAML that PyYAML (and thus pydantic-settings) reads back."""
+    return yaml.safe_dump(to_jsonable_python(obj), sort_keys=False, allow_unicode=True)
+
+
+_VALIDATOR_TYPES = (AfterValidator, BeforeValidator, PlainValidator, WrapValidator)
+
+
+def readable_constraints(metadata: list[Any]) -> str | None:
+    """Join a field's constraint metadata (``MaxLen(max_length=3)``, ``pattern='^x'``) for display.
+
+    Validator functions are left out: they carry no readable constraint, and their
+    repr contains a memory address that would change on every run.
+    """
+    readable = [str(m) for m in metadata if not isinstance(m, _VALIDATOR_TYPES) and str(m)]
+    return ", ".join(readable) if readable else None
 
 
 def get_str_dict_as_table(d: dict[str, str]) -> str:

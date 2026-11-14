@@ -1,8 +1,11 @@
 """Tests for psyplus/utils.py — annotation helpers and formatting utilities."""
-from typing import Any, Dict, List, Literal, Optional, Union
+import enum
+from pathlib import Path
+from typing import Annotated, Any, Dict, FrozenSet, List, Literal, Optional, Set, Tuple, Union
 
 import pytest
-from pydantic import BaseModel
+import yaml
+from pydantic import AfterValidator, BaseModel, Field
 
 from psyplus.utils import (
     clean_annotation,
@@ -12,8 +15,16 @@ from psyplus.utils import (
     is_optional,
     nested_pydantic_to_dict,
     python_annotation_to_readable,
+    readable_constraints,
+    to_json_text,
+    to_yaml_text,
     unwrap_optional,
 )
+
+
+class _Color(enum.Enum):
+    RED = "red"
+    BLUE = "blue"
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +170,62 @@ class TestAnnotationToReadable:
         result = python_annotation_to_readable(MyModel)
         assert "Object" in result
         assert "MyModel" in result
+
+    def test_union(self):
+        assert python_annotation_to_readable(Union[int, str]) == "int or str"
+        assert python_annotation_to_readable(int | str) == "int or str"
+
+    def test_enum_class(self):
+        assert python_annotation_to_readable(_Color) == "Enum"
+        assert has_literal(_Color)
+        assert get_literal_list(_Color) == ["red", "blue"]
+
+    def test_set_and_tuple_read_as_list(self):
+        assert python_annotation_to_readable(Set[int]) == "List of int"
+        assert python_annotation_to_readable(FrozenSet[str]) == "List of str"
+        assert python_annotation_to_readable(Tuple[int, ...]) == "List of int"
+
+    def test_annotated_is_unwrapped(self):
+        assert python_annotation_to_readable(Annotated[int, Field(gt=1)]) == "int"
+
+    def test_other_class_uses_its_name(self):
+        assert python_annotation_to_readable(Path) == "Path"
+
+
+# ---------------------------------------------------------------------------
+# readable_constraints / to_json_text / to_yaml_text
+# ---------------------------------------------------------------------------
+
+class TestReadableConstraints:
+    def _metadata(self, annotation):
+        class M(BaseModel):
+            x: annotation
+
+        return M.model_fields["x"].metadata
+
+    def test_annotated_types_constraints_are_shown(self):
+        meta = self._metadata(Annotated[int, Field(gt=1, le=5)])
+        assert readable_constraints(meta) == "Gt(gt=1), Le(le=5)"
+
+    def test_validator_functions_are_dropped(self):
+        meta = self._metadata(Annotated[str, Field(max_length=3), AfterValidator(str.strip)])
+        assert readable_constraints(meta) == "MaxLen(max_length=3)"
+
+    def test_empty(self):
+        assert readable_constraints([]) is None
+
+
+class TestTextRendering:
+    def test_json_keeps_non_ascii_and_converts_path_and_enum(self):
+        assert to_json_text("Grüße") == '"Grüße"'
+        assert to_json_text(Path("/tmp/x")) == '"/tmp/x"'
+        assert to_json_text(_Color.RED) == '"red"'
+
+    def test_yaml_keeps_non_ascii_and_is_plain_yaml(self):
+        text = to_yaml_text({"greeting": "Grüße", "where": Path("/tmp/x")})
+        assert "Grüße" in text
+        assert "!!" not in text
+        assert yaml.safe_load(text) == {"greeting": "Grüße", "where": "/tmp/x"}
 
 
 # ---------------------------------------------------------------------------

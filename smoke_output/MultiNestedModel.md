@@ -25,7 +25,6 @@ This document is auto-generated from the pydantic-settings model. All settings c
 |---|---|
 | Type | str |
 | Required | **Yes** |
-| Environment variable | `MULTI_SERVERS[*]__HOST` |
 
 ---
 
@@ -36,7 +35,6 @@ This document is auto-generated from the pydantic-settings model. All settings c
 | Type | int |
 | Required | No |
 | Default | `80` |
-| Environment variable | `MULTI_SERVERS[*]__PORT` |
 
 ---
 
@@ -61,7 +59,7 @@ This document is auto-generated from the pydantic-settings model. All settings c
 |---|---|
 | Type | str |
 | Required | **Yes** |
-| Environment variable | `MULTI_SERVER_MAP[*]__HOST` |
+| Environment variable | `MULTI_SERVER_MAP__<dict-key>__HOST` |
 
 ---
 
@@ -72,6 +70,6 @@ This document is auto-generated from the pydantic-settings model. All settings c
 | Type | int |
 | Required | No |
 | Default | `80` |
-| Environment variable | `MULTI_SERVER_MAP[*]__PORT` |
+| Environment variable | `MULTI_SERVER_MAP__<dict-key>__PORT` |
 
 ---

@@ -371,6 +371,22 @@ For nested models the env var path is built as:
 # e.g. MYAPP_DATABASE__HOST  (prefix="MYAPP_", delimiter="__")
 ```
 
+What pydantic-settings can set through env vars, and what the generated files show:
+
+| Field | Env var example | Behaviour |
+|---|---|---|
+| Field of a nested model, any depth | `MYAPP_DATABASE__SERVER__HOST=db` | Sets only this value. The other values from the YAML file stay. |
+| Whole nested model | `MYAPP_DATABASE='{"name": "x"}'` | JSON, merged into the values from the YAML file. |
+| List (`List[str]`, `List[SubModel]`) | `MYAPP_HOSTS='["a", "b"]'` | JSON, replaces the whole list. A single list element (`MYAPP_HOSTS__0`) can not be set, so list elements show no env var. |
+| Dict value (`Dict[str, ...]`) | `MYAPP_LABELS__team=core` | `<dict-key>` stands for the key. Env var names are case-insensitive by default, so the key arrives in lower case. |
+
+Only the root model's `env_prefix` and `env_nested_delimiter` count. A nested `BaseSettings`
+sub-model's own `env_prefix` is not used for its fields. Without `env_nested_delimiter`, nested
+fields have no env var of their own and can only be set through the JSON value of the top-level
+field. With `case_sensitive=True`, the env var names keep the case of the field names.
+A sub-model that defaults to null has no fields in the YAML file, so its comment lists the env
+vars of its fields under `Env-vars of the sub-fields:`.
+
 #### Nullable fields
 
 A nullable field (`Optional[int]`, `int | None`) shows its type as `int or null`. By default,
@@ -399,11 +415,16 @@ gives null.
 
 `load()` creates a thin dynamic subclass that adds the YAML file as a pydantic-settings source while keeping the normal env var source with higher priority. The effective source priority (highest → lowest) is:
 
-1. **Environment variables** (respects `env_prefix` / `env_nested_delimiter`)
-2. **YAML file** values
-3. **Model defaults**
+1. **Init arguments** (values passed to the settings class directly)
+2. **Environment variables** (respects `env_prefix` / `env_nested_delimiter`)
+3. **`.env` file** (if the model sets `env_file`)
+4. **Secrets directory** (if the model sets `secrets_dir`)
+5. **YAML file** values
+6. **Model defaults**
 
 No changes to your settings class are required.
+
+A missing YAML file is not an error: `load()` then returns the model defaults plus whatever the env vars, the `.env` file and the secrets directory set.
 
 ---
 
@@ -433,7 +454,7 @@ To visually inspect the generated YAML and Markdown for all built-in test models
 pdm run smoke
 ```
 
-This writes four files per model (YAML config template + Markdown reference) to `smoke_output/` and prints a preview of each to the terminal. The output is committed to the repository and linked from the [Example gallery](#example-gallery) section — re-run the script and commit the results whenever the generator logic changes.
+This writes two files per model (YAML config template + Markdown reference) to `smoke_output/` and prints a preview of each to the terminal. The output is committed to the repository and linked from the [Example gallery](#example-gallery) section. Re-run the script and commit the results whenever the generator logic changes.
 
 ```
 smoke_output/

@@ -209,6 +209,67 @@ class TestMissingList:
         cfg = load(Factory, tmp_path, {"APP_TAGS__1": "env"}, data={})
         assert cfg.tags == ["f0", "env"]
 
+    def test_builtin_default_factory(self, tmp_path):
+        # inspect.signature(list) is (iterable=(), /): one parameter, but with a
+        # default, so pydantic calls the factory without the validated data.
+        class Builtin(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="APP_", env_nested_delimiter="__")
+            tags: List[str] = Field(default_factory=list)
+            unique: Set[str] = Field(default_factory=set)
+            many: Tuple[int, ...] = Field(default_factory=tuple)
+            groups: Dict[str, List[str]] = Field(default_factory=dict)
+            either: Union[List[str], Dict[str, str]] = Field(default_factory=list)
+            keyed: Union[List[str], Dict[str, str]] = Field(default_factory=dict)
+
+        env = {
+            "APP_TAGS__0": "a", "APP_TAGS__1": "b", "APP_UNIQUE__0": "u",
+            "APP_MANY__0": "7", "APP_GROUPS__admins__0": "ann",
+            "APP_EITHER__0": "e", "APP_KEYED__0": "k",
+        }
+        cfg = load(Builtin, tmp_path, env, data={})
+        assert cfg.tags == ["a", "b"]
+        assert cfg.unique == {"u"}
+        assert cfg.many == (7,)
+        assert cfg.groups == {"admins": ["ann"]}
+        assert cfg.either == ["e"]
+        # No list there: the index is a dict key, as pydantic-settings reads it.
+        assert cfg.keyed == {"0": "k"}
+        with pytest.raises(SettingsError, match=r"`tags` has 0 element\(s\) \(its default"):
+            load(Builtin, tmp_path, {"APP_TAGS__1": "b"}, data={})
+
+    def test_default_factory_with_optional_parameter(self, tmp_path):
+        def positional(prefix="f"):
+            return [f"{prefix}0"]
+
+        def keyword_only(*, prefix="k"):
+            return [f"{prefix}0"]
+
+        class OptionalParameter(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="APP_", env_nested_delimiter="__")
+            p: List[str] = Field(default_factory=positional)
+            k: List[str] = Field(default_factory=keyword_only)
+
+        cfg = load(OptionalParameter, tmp_path, {"APP_P__1": "x", "APP_K__1": "y"}, data={})
+        assert (cfg.p, cfg.k) == (["f0", "x"], ["k0", "y"])
+
+    def test_list_in_model_from_default_factory(self, tmp_path):
+        class Users(BaseModel):
+            groups: List[str] = Field(default_factory=list)
+            roles: Dict[str, List[str]] = Field(default_factory=dict)
+
+        class Nested(BaseSettings):
+            model_config = SettingsConfigDict(env_prefix="APP_", env_nested_delimiter="__")
+            users: Users = Field(default_factory=Users)
+
+        env = {"APP_USERS__GROUPS__0": "admins", "APP_USERS__ROLES__ann__0": "dev"}
+        cfg = load(Nested, tmp_path, env, data={})
+        assert cfg.users.groups == ["admins"]
+        assert cfg.users.roles == {"ann": ["dev"]}
+        # With the list in the YAML file the element is changed there.
+        data = {"users": {"groups": ["staff", "guests"]}}
+        cfg = load(Nested, tmp_path, {"APP_USERS__GROUPS__1": "admins"}, data)
+        assert cfg.users.groups == ["staff", "admins"]
+
     def test_required_list_is_built_from_index_0(self, tmp_path):
         class Required(BaseSettings):
             model_config = SettingsConfigDict(env_prefix="APP_", env_nested_delimiter="__")

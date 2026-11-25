@@ -239,12 +239,23 @@ class _Node(dict):
 
 
 def _takes_data(factory: Any) -> bool:
-    """Whether a ``default_factory`` takes the validated data (pydantic's own rule)."""
+    """Whether a ``default_factory`` takes the validated data (pydantic's own rule).
+
+    That is a single parameter that can be passed by position and has no default.
+    ``list``, ``set`` and ``tuple`` have one (``iterable=()``), but with a default, so
+    pydantic calls them without the data.
+    """
     try:
-        parameters = inspect.signature(factory).parameters
+        parameters = list(inspect.signature(factory).parameters.values())
     except (ValueError, TypeError):
         return False
-    return len(parameters) == 1
+    return (
+        len(parameters) == 1
+        and parameters[0].kind in (
+            inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD
+        )
+        and parameters[0].default is inspect.Parameter.empty
+    )
 
 
 def _describe(env_names: list[str], in_dotenv: bool) -> str:
